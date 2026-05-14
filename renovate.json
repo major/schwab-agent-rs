@@ -1,0 +1,39 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices"
+  ],
+  "packageRules": [
+    {
+      "description": "Auto-merge patch, minor, and digest updates",
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "digest"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true,
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "Require manual review for major updates",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Group Rust CI action updates",
+      "matchPackageNames": [
+        "dtolnay/rust-toolchain",
+        "Swatinem/rust-cache"
+      ],
+      "groupName": "Rust CI actions"
+    }
+  ],
+  "schedule": [
+    "before 3am on Monday"
+  ],
+  "timezone": "America/Chicago"
+}
