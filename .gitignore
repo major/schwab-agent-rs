@@ -23,5 +23,8 @@ rustc-ice-*.txt
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Local cargo overrides (path dep for schwab-rs development)
+.cargo/config.toml
+
 # opencode
 .sisyphus
