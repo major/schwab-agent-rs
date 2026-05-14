@@ -197,6 +197,7 @@ Keep account hashes, tokens, and credentials out of logs, errors, tests, and doc
 
 When the project changes (new commands, strategies, args, error codes, CI config, etc.), update:
 
+- **`README.md`** - project overview and usage for GitHub
 - **`AGENTS.md`** - this file
 - **`SKILL.md`** - LLM-facing CLI usage guide
 - **`.coderabbit.yaml`** - path instructions and review guidelines

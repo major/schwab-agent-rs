@@ -2,6 +2,8 @@
 
 Structured JSON CLI for Charles Schwab API. All output is JSON envelopes. Set env vars once, then most commands need zero flags.
 
+> **Disclaimer:** This project is unofficial and is not affiliated with, endorsed by, or connected to Charles Schwab, TD Ameritrade, or thinkorswim in any way.
+
 ## Setup
 
 ```bash
