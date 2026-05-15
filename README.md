@@ -22,7 +22,7 @@ All output uses a versioned `Envelope<T>` JSON wrapper:
 {
   "ok": true,
   "command": "market.quote",
-  "schema_version": 1,
+  "version": 1,
   "data": { "..." : "..." },
   "warnings": [],
   "meta": { "..." : "..." }
@@ -34,7 +34,6 @@ Errors use the same envelope shape with an `error` field instead of `data`.
 ## Prerequisites
 
 - Rust toolchain (stable, >= 1.95)
-- The [`schwab-rs`](https://github.com/major/schwab-rs) crate checked out as a sibling directory (`../schwab-rs`)
 - A Charles Schwab developer application (client ID + secret)
 
 ## Building
@@ -43,10 +42,10 @@ Errors use the same envelope shape with an `error` field instead of `data`.
 cargo build --release
 ```
 
-The `decimal` feature flag switches price types to fixed-point decimals:
+The `decimal` feature is enabled by default, switching price types to fixed-point decimals. To build without it:
 
 ```bash
-cargo build --release --features decimal
+cargo build --release --no-default-features
 ```
 
 ## Configuration
@@ -120,7 +119,7 @@ schwab-agent stock place-from-preview --account HASH_OR_NICKNAME --digest DIGEST
 
 ### order
 
-Option order workflow supporting 15 named strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`, `bull-call-spread`, `bear-call-spread`, `bull-put-spread`, `bear-put-spread`, `long-straddle`, `short-straddle`, `long-strangle`, `short-strangle`, `short-iron-condor`, `jade-lizard`.
+Option order workflow supporting 15 named strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`, `call-debit-spread`, `call-credit-spread`, `put-debit-spread`, `put-credit-spread`, `long-straddle`, `short-straddle`, `long-strangle`, `short-strangle`, `short-iron-condor`, `jade-lizard`.
 
 Subcommands: `build`, `preview`, `place`, `place-from-preview`, `replace`, `list`, `get`, `cancel`.
 
@@ -139,8 +138,8 @@ Option chain data: `expirations`, `chain`, `screen`, `contract`.
 ```bash
 schwab-agent option expirations AAPL
 schwab-agent option chain AAPL --expiration 2025-06-20 --type CALL
-schwab-agent option screen AAPL --expiration 2025-06-20 --min-delta 0.20 --max-delta 0.40
-schwab-agent option contract AAPL250620C00200000
+schwab-agent option screen AAPL --expiration 2025-06-20 --delta-min 0.20 --delta-max 0.40
+schwab-agent option contract AAPL --expiration 2025-06-20 --strike 200 --call
 ```
 
 ## Order Workflow
