@@ -285,3 +285,42 @@ fn hint_returns_none_for_non_auth_schwab_errors() {
     });
     assert!(err.hint().is_none());
 }
+
+#[test]
+fn ta_insufficient_data_classification() {
+    let err = AppError::TaInsufficientData {
+        needed: 252,
+        got: 50,
+        indicator: "SMA-200".to_string(),
+    };
+    assert_eq!(err.exit_code(), 10);
+    assert_eq!(err.code(), "ta.insufficient_data");
+    assert_eq!(err.category(), "ta");
+    assert!(!err.retryable());
+    assert!(err.hint().unwrap().contains("interval"));
+}
+
+#[test]
+fn ta_invalid_interval_classification() {
+    let err = AppError::TaInvalidInterval {
+        interval: "hourly".to_string(),
+    };
+    assert_eq!(err.exit_code(), 10);
+    assert_eq!(err.code(), "ta.invalid_interval");
+    assert_eq!(err.category(), "ta");
+    assert!(!err.retryable());
+    assert!(err.hint().is_some());
+}
+
+#[test]
+fn ta_calculation_error_classification() {
+    let err = AppError::TaCalculationError {
+        indicator: "stochastic".to_string(),
+        reason: "division by zero".to_string(),
+    };
+    assert_eq!(err.exit_code(), 20);
+    assert_eq!(err.code(), "ta.calculation_error");
+    assert_eq!(err.category(), "ta");
+    assert!(!err.retryable());
+    assert!(err.hint().is_none());
+}

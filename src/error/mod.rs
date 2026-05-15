@@ -30,6 +30,21 @@ pub enum AppError {
     /// Options command input validation failed.
     #[error("{message}")]
     OptionsValidation { message: String },
+    /// Not enough candle data to compute the indicator.
+    #[error("not enough candle data for {indicator}: need {needed} candles, got {got}")]
+    TaInsufficientData {
+        needed: usize,
+        got: usize,
+        indicator: String,
+    },
+    /// Unrecognized interval string.
+    #[error(
+        "unrecognized interval '{interval}': valid values are daily, weekly, 1min, 5min, 15min, 30min"
+    )]
+    TaInvalidInterval { interval: String },
+    /// Indicator math failure (e.g., division by zero).
+    #[error("TA calculation error in {indicator}: {reason}")]
+    TaCalculationError { indicator: String, reason: String },
     /// Preview digest operation failed (save, load, verify, or expired).
     #[error("preview error: {0}")]
     Preview(String),
@@ -46,6 +61,8 @@ impl AppError {
             Self::OrderValidation(_) => 10,
             Self::AccountValidation(_) => 10,
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => 10,
+            Self::TaInsufficientData { .. } | Self::TaInvalidInterval { .. } => 10,
+            Self::TaCalculationError { .. } => 20,
             Self::Preview(_) => 11,
         }
     }
@@ -63,6 +80,9 @@ impl AppError {
             Self::AccountValidation(_) => "account.validation_failed",
             Self::OptionsSymbolNotFound { .. } => "options.symbol_not_found",
             Self::OptionsValidation { .. } => "options.validation_failed",
+            Self::TaInsufficientData { .. } => "ta.insufficient_data",
+            Self::TaInvalidInterval { .. } => "ta.invalid_interval",
+            Self::TaCalculationError { .. } => "ta.calculation_error",
             Self::Preview(_) => "order.preview_failed",
         }
     }
@@ -78,6 +98,9 @@ impl AppError {
             Self::OrderValidation(_) | Self::Preview(_) => "order",
             Self::AccountValidation(_) => "account",
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => "options",
+            Self::TaInsufficientData { .. }
+            | Self::TaInvalidInterval { .. }
+            | Self::TaCalculationError { .. } => "ta",
         }
     }
 
@@ -105,6 +128,10 @@ impl AppError {
             }
             Self::Schwab(schwab::Error::AuthExpired | schwab::Error::AuthRequired) => {
                 Some("Run auth refresh, or re-authenticate with auth login-url and auth exchange.")
+            }
+            Self::TaInsufficientData { .. } => Some("Try a shorter interval or fewer --points."),
+            Self::TaInvalidInterval { .. } => {
+                Some("Valid intervals: daily, weekly, 1min, 5min, 15min, 30min")
             }
             _ => None,
         }
