@@ -9,7 +9,7 @@ Agent-oriented JSON CLI porcelain for the Charles Schwab API, built on top of [s
 | | |
 |---|---|
 | License | MIT |
-| MSRV | 1.88 |
+| MSRV | 1.95 |
 | Edition | 2024 |
 
 ## Overview
@@ -33,7 +33,7 @@ Errors use the same envelope shape with an `error` field instead of `data`.
 
 ## Prerequisites
 
-- Rust toolchain (stable, >= 1.88)
+- Rust toolchain (stable, >= 1.95)
 - The [`schwab-rs`](https://github.com/major/schwab-rs) crate checked out as a sibling directory (`../schwab-rs`)
 - A Charles Schwab developer application (client ID + secret)
 
@@ -169,7 +169,7 @@ make coverage # cargo llvm-cov, 90% line coverage threshold
 make audit    # cargo audit
 ```
 
-CI runs on Ubuntu, macOS, and Windows with MSRV verification against 1.88.
+CI runs on Ubuntu, macOS, and Windows with MSRV verification against 1.95.
 
 ## License
 

@@ -4,7 +4,7 @@
 
 Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is resolved from crates.io for CI compatibility.
 
-- Edition 2024, MSRV 1.88
+- Edition 2024, MSRV 1.95
 - `publish = false` (private crate)
 - Feature flag: `decimal` (enables `schwab/decimal`) - must be built and tested separately
 
@@ -203,7 +203,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 ### ci.yml
 
-- fmt (nightly rustfmt), clippy (stable), test (stable), MSRV (1.88, `--locked`), docs (stable)
+- fmt (nightly rustfmt), clippy (stable), test (stable), MSRV (1.95, `--locked`), docs (stable)
 - Uses pinned action SHAs
 
 ### audit.yml

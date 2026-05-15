@@ -65,5 +65,5 @@ fn enum_to_value<T: Serialize>(value: &Option<T>) -> Value {
     value
         .as_ref()
         .and_then(|v| serde_json::to_value(v).ok())
-        .unwrap_or(Value::Null)
+        .unwrap_or_default()
 }

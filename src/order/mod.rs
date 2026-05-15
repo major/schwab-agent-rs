@@ -1071,12 +1071,9 @@ async fn do_replace(
         .replace_order(&account_hash, order_id, &order)
         .await?;
     let order_json = serialize_order(&order)?;
-    let new_order_id = response.order_id.ok_or_else(|| {
-        AppError::OrderValidation(
-            "replace response did not include the new order ID required for verification"
-                .to_string(),
-        )
-    })?;
+    let new_order_id = response.order_id.ok_or(AppError::OrderValidation(
+        "replace response did not include the new order ID required for verification".to_string(),
+    ))?;
 
     let result = verify::verify_order(
         &client,

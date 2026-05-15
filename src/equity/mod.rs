@@ -314,26 +314,24 @@ fn build_equity_order(action: &EquityAction) -> Result<schwab::OrderBuilder, App
     let order = match a.order_type {
         OrderTypeChoice::Market => schwab::OrderBuilder::equity_market(&a.symbol, inst, qty),
         OrderTypeChoice::Limit => {
-            let price = a.price.ok_or_else(|| {
-                AppError::OrderValidation("--price is required for limit orders".to_string())
-            })?;
+            let price = a.price.ok_or(AppError::OrderValidation(
+                "--price is required for limit orders".to_string(),
+            ))?;
             schwab::OrderBuilder::equity_limit(&a.symbol, inst, qty, to_number(price)?)
         }
         OrderTypeChoice::Stop => {
-            let stop = a.stop_price.ok_or_else(|| {
-                AppError::OrderValidation("--stop-price is required for stop orders".to_string())
-            })?;
+            let stop = a.stop_price.ok_or(AppError::OrderValidation(
+                "--stop-price is required for stop orders".to_string(),
+            ))?;
             schwab::OrderBuilder::equity_stop(&a.symbol, inst, qty, to_number(stop)?)
         }
         OrderTypeChoice::StopLimit => {
-            let price = a.price.ok_or_else(|| {
-                AppError::OrderValidation("--price is required for stop-limit orders".to_string())
-            })?;
-            let stop = a.stop_price.ok_or_else(|| {
-                AppError::OrderValidation(
-                    "--stop-price is required for stop-limit orders".to_string(),
-                )
-            })?;
+            let price = a.price.ok_or(AppError::OrderValidation(
+                "--price is required for stop-limit orders".to_string(),
+            ))?;
+            let stop = a.stop_price.ok_or(AppError::OrderValidation(
+                "--stop-price is required for stop-limit orders".to_string(),
+            ))?;
             schwab::OrderBuilder::equity_stop_limit(
                 &a.symbol,
                 inst,

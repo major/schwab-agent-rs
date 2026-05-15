@@ -76,7 +76,7 @@ pub(super) fn build_output(
     map.insert("dte".into(), Value::from(dte));
     map.insert(
         "strike".into(),
-        serde_json::to_value(flat.strike).unwrap_or(Value::Null),
+        serde_json::to_value(flat.strike).unwrap_or_default(),
     );
     map.insert("type".into(), Value::String(contract_type.to_string()));
 
@@ -152,7 +152,7 @@ fn greek_or_zero(value: &Option<Value>) -> Value {
 
 /// Unwraps an optional JSON value, returning `null` for `None`.
 fn value_or_null(value: &Option<Value>) -> Value {
-    value.clone().unwrap_or(Value::Null)
+    value.clone().unwrap_or_default()
 }
 
 /// Extracts a serializable field from the raw [`OptionContract`].
@@ -163,7 +163,7 @@ where
 {
     raw.and_then(extractor)
         .and_then(|v| serde_json::to_value(v).ok())
-        .unwrap_or(Value::Null)
+        .unwrap_or_default()
 }
 
 /// Returns true when a Schwab error indicates the symbol was not found.

@@ -333,7 +333,7 @@ fn underlying_price(chain: &OptionChain) -> Value {
                 .and_then(|underlying| underlying.mark.as_ref())
         })
         .and_then(|value| to_value(value).ok())
-        .unwrap_or(Value::Null)
+        .unwrap_or_default()
 }
 
 fn optional_number(value: Option<f64>) -> Result<Option<Number>, AppError> {
@@ -347,11 +347,11 @@ fn number_arg(value: f64) -> Result<Number, AppError> {
 }
 
 fn number_value(value: Number) -> Value {
-    to_value(value).unwrap_or(Value::Null)
+    to_value(value).unwrap_or_default()
 }
 
 fn option_value(value: &Option<Value>) -> Value {
-    value.clone().unwrap_or(Value::Null)
+    value.clone().unwrap_or_default()
 }
 
 fn normalized_contract_type(contract_type: Option<&str>) -> Option<String> {

@@ -49,7 +49,9 @@ pub struct SavedPreview {
 fn preview_dir() -> Result<PathBuf, AppError> {
     let base = dirs::state_dir()
         .or_else(dirs::data_local_dir)
-        .ok_or_else(|| AppError::Preview("cannot determine state directory".to_string()))?;
+        .ok_or(AppError::Preview(
+            "cannot determine state directory".to_string(),
+        ))?;
     let dir = base.join("schwab-agent").join("previews");
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::Preview(format!("failed to create preview directory: {e}")))?;
