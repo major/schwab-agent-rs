@@ -14,7 +14,6 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::AppError;
-use crate::output::{CommandOutput, Envelope, Metadata};
 
 /// Verification state after a mutable order action.
 #[derive(Clone, Debug, Serialize)]
@@ -176,22 +175,13 @@ fn verification_failures(action: &str, order: &Value) -> Vec<String> {
     }
 }
 
-/// Builds a [`CommandOutput`] envelope from an [`OrderActionResult`].
+/// Serializes an [`OrderActionResult`] into a JSON [`Value`].
 ///
-/// Sets warnings on the envelope when verification failed so agents know
-/// the action may need manual confirmation.
-pub(crate) fn action_envelope(
-    command: &str,
-    result: OrderActionResult,
-) -> Result<CommandOutput, AppError> {
-    let warnings: Vec<String> = match result.verification_state {
-        VerificationState::Unverified => result.verification_failures.clone(),
-        VerificationState::Verified => vec![],
-    };
-    let value = serde_json::to_value(&result)?;
-    let mut envelope = Envelope::success(command, value, Metadata::now());
-    envelope.warnings = warnings;
-    Ok(envelope)
+/// Verification failures are already present in the result's
+/// `verification_state` and `verification_failures` fields, so no
+/// separate warnings wrapper is needed.
+pub(crate) fn action_value(result: OrderActionResult) -> Result<Value, AppError> {
+    Ok(serde_json::to_value(&result)?)
 }
 
 #[cfg(test)]
@@ -201,7 +191,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn action_envelope_sets_warnings_on_unverified() {
+    fn action_value_preserves_unverified_failures() {
         let result = OrderActionResult {
             action: "place".to_string(),
             order_id: Some(12345),
@@ -214,14 +204,16 @@ mod tests {
             original_command: None,
         };
 
-        let envelope = action_envelope("order.place.long-call", result).unwrap();
-        assert!(envelope.ok);
-        assert_eq!(envelope.warnings.len(), 1);
-        assert!(envelope.warnings[0].contains("timeout"));
+        let data = action_value(result).unwrap();
+        assert_eq!(data["verification_state"], "unverified");
+        assert_eq!(
+            data["verification_failures"][0],
+            "failed to retrieve order: timeout"
+        );
     }
 
     #[test]
-    fn action_envelope_has_no_warnings_when_verified() {
+    fn action_value_verified_includes_all_fields() {
         let result = OrderActionResult {
             action: "place".to_string(),
             order_id: Some(12345),
@@ -234,10 +226,7 @@ mod tests {
             original_command: None,
         };
 
-        let envelope = action_envelope("order.place.long-call", result).unwrap();
-        assert!(envelope.ok);
-        assert!(envelope.warnings.is_empty());
-        let data = envelope.data.unwrap();
+        let data = action_value(result).unwrap();
         assert_eq!(data["order_id"], 12345);
         assert_eq!(data["verification_state"], "verified");
         assert_eq!(data["order"]["orderType"], "LIMIT");
@@ -245,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn action_envelope_omits_empty_verification_failures() {
+    fn action_value_omits_empty_verification_failures() {
         let result = OrderActionResult {
             action: "cancel".to_string(),
             order_id: Some(99999),
@@ -258,14 +247,13 @@ mod tests {
             original_command: None,
         };
 
-        let envelope = action_envelope("order.cancel", result).unwrap();
-        let serialized = serde_json::to_string(&envelope).unwrap();
+        let serialized = serde_json::to_string(&action_value(result).unwrap()).unwrap();
         // verification_failures should be skipped when empty
         assert!(!serialized.contains("verification_failures"));
     }
 
     #[test]
-    fn action_envelope_includes_submitted_order_when_present() {
+    fn action_value_includes_submitted_order_when_present() {
         let submitted = json!({"orderType": "LIMIT", "price": 150.0});
         let result = OrderActionResult {
             action: "place".to_string(),
@@ -279,8 +267,7 @@ mod tests {
             original_command: None,
         };
 
-        let envelope = action_envelope("stock.place.buy", result).unwrap();
-        let data = envelope.data.unwrap();
+        let data = action_value(result).unwrap();
         assert_eq!(data["order"]["price"], 150.0);
     }
 
@@ -288,12 +275,13 @@ mod tests {
     fn unverified_result_without_order_id() {
         let result = result_without_order_id("place", None, Some(json!({"orderType": "MARKET"})));
 
-        let envelope = action_envelope("stock.place.buy", result).unwrap();
-        assert!(envelope.ok);
-        assert_eq!(envelope.warnings.len(), 1);
-        let data = envelope.data.unwrap();
+        let data = action_value(result).unwrap();
         assert!(data["order_id"].is_null());
         assert_eq!(data["verification_state"], "unverified");
+        assert_eq!(
+            data["verification_failures"][0],
+            "no order ID returned by API"
+        );
     }
 
     #[test]
@@ -320,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn action_envelope_includes_preview_context() {
+    fn action_value_includes_preview_context() {
         let result = OrderActionResult {
             action: "place".to_string(),
             order_id: Some(12345),
@@ -333,8 +321,7 @@ mod tests {
             original_command: Some("order.preview.long-call".to_string()),
         };
 
-        let envelope = action_envelope("order.place-from-preview", result).unwrap();
-        let data = envelope.data.unwrap();
+        let data = action_value(result).unwrap();
         assert_eq!(data["digest"], "abc123def456");
         assert_eq!(data["original_command"], "order.preview.long-call");
     }

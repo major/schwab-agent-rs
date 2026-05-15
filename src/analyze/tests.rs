@@ -2,23 +2,20 @@
 
 use serde_json::{Value, json};
 
-use super::envelope_from_results;
 use crate::ta::types::{
-    AdxPoint, AnalyzeSymbolResult, BbandsPoint, DashboardOutput, DerivedFields, MacdPoint,
-    MomentumIndicators, MomentumSignal, SignalSummary, StochPoint, TaPoint, TrendIndicators,
-    TrendSignal, VolatilityIndicators, VolatilitySignal, VolumeIndicators, VolumeSignal,
+    AdxPoint, AnalyzeOutput, AnalyzeSymbolResult, BbandsPoint, DashboardOutput, DerivedFields,
+    MacdPoint, MomentumIndicators, MomentumSignal, SignalSummary, StochPoint, TaPoint,
+    TrendIndicators, TrendSignal, VolatilityIndicators, VolatilitySignal, VolumeIndicators,
+    VolumeSignal,
 };
 
 #[test]
-fn analyze_envelope_all_succeed_has_no_warnings() {
-    let envelope = envelope_from_results(vec![successful_result("AAPL")]);
+fn analyze_output_all_succeed_has_no_errors() {
+    let output = AnalyzeOutput {
+        results: vec![successful_result("AAPL")],
+    };
+    let result = &output.results[0];
 
-    assert!(envelope.ok);
-    assert_eq!(envelope.command.as_deref(), Some("analyze"));
-    assert!(envelope.error.is_none());
-    assert!(envelope.warnings.is_empty());
-
-    let result = only_result(&envelope);
     assert!(result.quote.is_some());
     assert!(result.analysis.is_some());
     assert!(result.quote_error.is_none());
@@ -26,13 +23,12 @@ fn analyze_envelope_all_succeed_has_no_warnings() {
 }
 
 #[test]
-fn analyze_envelope_quote_fails_dashboard_succeeds_warns_and_keeps_analysis() {
-    let envelope = envelope_from_results(vec![quote_failed_result("AAPL")]);
+fn analyze_output_quote_fails_dashboard_succeeds_keeps_analysis() {
+    let output = AnalyzeOutput {
+        results: vec![quote_failed_result("AAPL")],
+    };
+    let result = &output.results[0];
 
-    assert!(envelope.ok);
-    assert_eq!(envelope.warnings, ["AAPL: quote failed: quote timeout"]);
-
-    let result = only_result(&envelope);
     assert!(result.quote.is_none());
     assert!(result.analysis.is_some());
     assert_eq!(result.quote_error.as_deref(), Some("quote timeout"));
@@ -40,16 +36,12 @@ fn analyze_envelope_quote_fails_dashboard_succeeds_warns_and_keeps_analysis() {
 }
 
 #[test]
-fn analyze_envelope_dashboard_fails_quote_succeeds_warns_and_keeps_quote() {
-    let envelope = envelope_from_results(vec![analysis_failed_result("AAPL")]);
+fn analyze_output_dashboard_fails_quote_succeeds_keeps_quote() {
+    let output = AnalyzeOutput {
+        results: vec![analysis_failed_result("AAPL")],
+    };
+    let result = &output.results[0];
 
-    assert!(envelope.ok);
-    assert_eq!(
-        envelope.warnings,
-        ["AAPL: analysis failed: not enough candles"]
-    );
-
-    let result = only_result(&envelope);
     assert!(result.quote.is_some());
     assert!(result.analysis.is_none());
     assert!(result.quote_error.is_none());
@@ -57,19 +49,12 @@ fn analyze_envelope_dashboard_fails_quote_succeeds_warns_and_keeps_quote() {
 }
 
 #[test]
-fn analyze_envelope_single_symbol_both_fail_is_not_ok() {
-    let envelope = envelope_from_results(vec![failed_result("AAPL")]);
+fn analyze_output_single_symbol_both_fail() {
+    let output = AnalyzeOutput {
+        results: vec![failed_result("AAPL")],
+    };
+    let result = &output.results[0];
 
-    assert!(!envelope.ok);
-    assert_eq!(
-        envelope.warnings,
-        [
-            "AAPL: quote failed: quote timeout",
-            "AAPL: analysis failed: not enough candles",
-        ]
-    );
-
-    let result = only_result(&envelope);
     assert!(result.quote.is_none());
     assert!(result.analysis.is_none());
     assert_eq!(result.quote_error.as_deref(), Some("quote timeout"));
@@ -77,54 +62,53 @@ fn analyze_envelope_single_symbol_both_fail_is_not_ok() {
 }
 
 #[test]
-fn analyze_envelope_multi_symbol_mixed_results_is_ok_with_all_warnings() {
-    let envelope = envelope_from_results(vec![
-        quote_failed_result("AAPL"),
-        failed_result("MSFT"),
-        successful_result("SPY"),
-    ]);
+fn analyze_output_multi_symbol_mixed_results() {
+    let output = AnalyzeOutput {
+        results: vec![
+            quote_failed_result("AAPL"),
+            failed_result("MSFT"),
+            successful_result("SPY"),
+        ],
+    };
 
-    assert!(envelope.ok);
-    assert_eq!(
-        envelope.warnings,
-        [
-            "AAPL: quote failed: quote timeout",
-            "MSFT: quote failed: quote timeout",
-            "MSFT: analysis failed: not enough candles",
-        ]
-    );
-
-    let data = envelope.data.as_ref().expect("analyze data");
-    assert_eq!(data.results.len(), 3);
-    assert!(data.results[0].analysis.is_some());
-    assert!(data.results[1].quote.is_none());
-    assert!(data.results[1].analysis.is_none());
-    assert!(data.results[2].quote.is_some());
-    assert!(data.results[2].analysis.is_some());
+    assert_eq!(output.results.len(), 3);
+    // AAPL: analysis ok, quote failed
+    assert!(output.results[0].analysis.is_some());
+    assert!(output.results[0].quote.is_none());
+    // MSFT: both failed
+    assert!(output.results[1].quote.is_none());
+    assert!(output.results[1].analysis.is_none());
+    // SPY: both ok
+    assert!(output.results[2].quote.is_some());
+    assert!(output.results[2].analysis.is_some());
 }
 
 #[test]
-fn analyze_envelope_multi_symbol_all_completely_fail_is_not_ok() {
-    let envelope = envelope_from_results(vec![failed_result("AAPL"), failed_result("MSFT")]);
+fn analyze_output_multi_symbol_all_completely_fail() {
+    let output = AnalyzeOutput {
+        results: vec![failed_result("AAPL"), failed_result("MSFT")],
+    };
 
-    assert!(!envelope.ok);
-    assert_eq!(envelope.warnings.len(), 4);
-
-    let data = envelope.data.as_ref().expect("analyze data");
-    assert_eq!(data.results.len(), 2);
+    assert_eq!(output.results.len(), 2);
     assert!(
-        data.results
+        output
+            .results
             .iter()
             .all(|result| result.quote.is_none() && result.analysis.is_none())
     );
 }
 
-fn only_result(
-    envelope: &crate::output::Envelope<crate::ta::types::AnalyzeOutput>,
-) -> &AnalyzeSymbolResult {
-    let data = envelope.data.as_ref().expect("analyze data");
-    assert_eq!(data.results.len(), 1);
-    &data.results[0]
+#[test]
+fn analyze_output_serializes_to_json() {
+    let output = AnalyzeOutput {
+        results: vec![successful_result("AAPL")],
+    };
+    let value = serde_json::to_value(&output).unwrap();
+
+    assert!(value["results"].is_array());
+    assert_eq!(value["results"][0]["symbol"], "AAPL");
+    assert!(value["results"][0]["quote"].is_object());
+    assert!(value["results"][0]["analysis"].is_object());
 }
 
 fn successful_result(symbol: &str) -> AnalyzeSymbolResult {

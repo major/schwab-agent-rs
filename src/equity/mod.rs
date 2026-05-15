@@ -33,7 +33,7 @@ use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
 use crate::order::preview;
-use crate::output::{CommandOutput, Envelope, Metadata};
+
 use crate::shared::{DurationChoice, SessionChoice, to_number};
 use crate::verify;
 
@@ -235,35 +235,23 @@ pub struct RawPlaceArgs {
 ///
 /// Stock commands bypass the generic envelope wrapping in `execute()` because
 /// they compute their own dynamic command names (e.g., `stock.build.buy`).
-pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<CommandOutput, AppError> {
+pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<Value, AppError> {
     match command {
-        EquityCommand::Build(action) => {
-            let name = format!("stock.build.{}", action_name(action));
-            let data = do_build(action)?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
-        }
+        EquityCommand::Build(action) => do_build(action),
         EquityCommand::Preview(args) => {
             let name = format!("stock.preview.{}", action_name(&args.action));
-            let data =
-                do_preview(cli, &args.account, &args.action, args.save_preview, &name).await?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
+            do_preview(cli, &args.account, &args.action, args.save_preview, &name).await
         }
         EquityCommand::Place(args) => {
             crate::config::require_mutable_enabled()?;
-            let name = format!("stock.place.{}", action_name(&args.action));
-            do_place(cli, &args.account, &args.action, &name).await
+            do_place(cli, &args.account, &args.action).await
         }
         EquityCommand::PlaceFromPreview(args) => {
             crate::config::require_mutable_enabled()?;
             do_place_from_preview(cli, &args.account, &args.digest).await
         }
         EquityCommand::PreviewRaw(args) => {
-            let data = do_preview_raw(cli, &args.account, &args.json, args.save_preview).await?;
-            Ok(Envelope::success(
-                "stock.preview-raw",
-                data,
-                Metadata::now(),
-            ))
+            do_preview_raw(cli, &args.account, &args.json, args.save_preview).await
         }
         EquityCommand::PlaceRaw(args) => {
             crate::config::require_mutable_enabled()?;
@@ -397,12 +385,7 @@ async fn do_preview(
 }
 
 /// Places the order directly via the Schwab API with post-place verification.
-async fn do_place(
-    cli: &Cli,
-    account: &str,
-    action: &EquityAction,
-    command_name: &str,
-) -> Result<CommandOutput, AppError> {
+async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
@@ -420,16 +403,12 @@ async fn do_place(
     )
     .await;
 
-    verify::action_envelope(command_name, result)
+    verify::action_value(result)
 }
 
 /// Places an order from a previously saved preview digest with post-place
 /// verification.
-async fn do_place_from_preview(
-    cli: &Cli,
-    account: &str,
-    digest: &str,
-) -> Result<CommandOutput, AppError> {
+async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
     let account_hash = resolved.account_hash;
@@ -449,7 +428,7 @@ async fn do_place_from_preview(
     result.digest = Some(digest.to_string());
     result.original_command = Some(saved.command);
 
-    verify::action_envelope("stock.place-from-preview", result)
+    verify::action_value(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +470,7 @@ async fn do_preview_raw(
 
 /// Places a raw JSON order payload via the Schwab API with post-place
 /// verification.
-async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<CommandOutput, AppError> {
+async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
@@ -508,5 +487,5 @@ async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<CommandOut
     )
     .await;
 
-    verify::action_envelope("stock.place-raw", result)
+    verify::action_value(result)
 }

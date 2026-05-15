@@ -9,7 +9,6 @@ use serde_json::Value;
 use crate::cli::{AnalyzeArgs, DashboardArgs};
 use crate::error::AppError;
 use crate::market;
-use crate::output::{Envelope, Metadata, SCHEMA_VERSION};
 use crate::ta;
 use crate::ta::types::{
     AdxPoint, AnalyzeOutput, AnalyzeSymbolResult, BbandsPoint, DashboardOutput, DerivedFields,
@@ -24,18 +23,16 @@ use crate::ta::types::{
 ///
 /// Returns [`AppError`] only for unexpected serialization failures that prevent
 /// building the command output. Per-symbol quote and dashboard failures are
-/// captured inside the returned envelope as warnings and result fields.
-pub async fn analyze(
-    client: &Client,
-    args: &AnalyzeArgs,
-) -> Result<Envelope<AnalyzeOutput>, AppError> {
+/// captured in each result's `quote_error` and `analysis_error` fields.
+pub async fn analyze(client: &Client, args: &AnalyzeArgs) -> Result<Value, AppError> {
     let mut results = Vec::with_capacity(args.symbols.len());
 
     for symbol in &args.symbols {
         results.push(analyze_symbol(client, args, symbol).await);
     }
 
-    Ok(envelope_from_results(results))
+    let output = AnalyzeOutput { results };
+    Ok(serde_json::to_value(&output)?)
 }
 
 async fn analyze_symbol(client: &Client, args: &AnalyzeArgs, symbol: &str) -> AnalyzeSymbolResult {
@@ -86,51 +83,6 @@ async fn dashboard_result(
         },
         Err(error) => (None, Some(error.to_string())),
     }
-}
-
-/// Constructs an `Envelope<AnalyzeOutput>` from per-symbol results.
-///
-/// The envelope `ok` field is `true` if at least one symbol has quote or analysis
-/// data. Individual symbol failures are collected as warnings rather than failing
-/// the command.
-#[must_use]
-pub(crate) fn envelope_from_results(results: Vec<AnalyzeSymbolResult>) -> Envelope<AnalyzeOutput> {
-    let ok = results.iter().any(result_has_data);
-    let warnings = warnings_from_results(&results);
-
-    Envelope {
-        version: SCHEMA_VERSION,
-        ok,
-        command: Some("analyze".to_string()),
-        data: Some(AnalyzeOutput { results }),
-        error: None,
-        warnings,
-        meta: Metadata::now(),
-    }
-}
-
-#[must_use]
-fn result_has_data(result: &AnalyzeSymbolResult) -> bool {
-    result.quote.is_some() || result.analysis.is_some()
-}
-
-#[must_use]
-fn warnings_from_results(results: &[AnalyzeSymbolResult]) -> Vec<String> {
-    results
-        .iter()
-        .flat_map(|result| {
-            let quote_warning = result
-                .quote_error
-                .as_ref()
-                .map(|error| format!("{}: quote failed: {error}", result.symbol));
-            let analysis_warning = result
-                .analysis_error
-                .as_ref()
-                .map(|error| format!("{}: analysis failed: {error}", result.symbol));
-
-            [quote_warning, analysis_warning].into_iter().flatten()
-        })
-        .collect()
 }
 
 fn dashboard_from_value(value: Value) -> Result<DashboardOutput, AppError> {
