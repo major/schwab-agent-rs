@@ -11,7 +11,7 @@ publish = false
 clap = { version = "4.5.51", features = ["derive", "env"] }
 dirs = "6.0.0"
 open = "5.3.2"
-schwab = { path = "../schwab-rs" }
+schwab = "0.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.145", features = ["preserve_order"] }
 sha2 = "0.10"

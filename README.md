@@ -4,9 +4,7 @@ Agent-oriented JSON CLI porcelain for the Charles Schwab API, built on top of [s
 
 > **Disclaimer:** This project is unofficial and is not affiliated with, endorsed by, or connected to Charles Schwab, TD Ameritrade, or thinkorswim in any way. Use at your own risk.
 
-<!-- Uncomment once a GitHub remote is configured:
 [![CI](https://github.com/major/schwab-agent-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/major/schwab-agent-rs/actions/workflows/ci.yml)
--->
 
 | | |
 |---|---|

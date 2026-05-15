@@ -136,7 +136,7 @@ Use `make check` for the full suite. Individual targets:
 make fmt          # cargo fmt --all --check
 make fmt-fix      # cargo fmt --all
 make clippy       # Runs twice: default + --features decimal
-                  # Flags: -D clippy::all -A clippy::needless_borrow -A clippy::large_enum_variant
+                  # Flags: -D clippy::all -A clippy::needless_borrow -A clippy::large_enum_variant -A clippy::too_many_arguments
 make test         # Runs twice: default + --features decimal
 make doc          # Checks for broken intra-doc links
 make coverage     # cargo llvm-cov test --fail-under-lines 90
