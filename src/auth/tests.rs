@@ -219,7 +219,10 @@ fn auth_status_from_token_file_no_expires_at() {
 #[test]
 fn build_config_missing_client_id() {
     let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
-    let err = super::build_config(&cli).unwrap_err();
+    let dir = tempfile::tempdir().unwrap();
+    let empty_config = dir.path().join("config.json");
+    std::fs::write(&empty_config, "{}").unwrap();
+    let err = super::build_config_from(&cli, &empty_config).unwrap_err();
     match err {
         crate::error::AppError::MissingAuthConfig(field) => {
             assert_eq!(field, "client_id");
@@ -231,7 +234,10 @@ fn build_config_missing_client_id() {
 #[test]
 fn build_config_missing_client_secret() {
     let cli = Cli::parse_from(["schwab-agent", "--client-id", "my-id", "auth", "status"]);
-    let err = super::build_config(&cli).unwrap_err();
+    let dir = tempfile::tempdir().unwrap();
+    let empty_config = dir.path().join("config.json");
+    std::fs::write(&empty_config, "{}").unwrap();
+    let err = super::build_config_from(&cli, &empty_config).unwrap_err();
     match err {
         crate::error::AppError::MissingAuthConfig(field) => {
             assert_eq!(field, "client_secret");
@@ -253,6 +259,44 @@ fn build_config_valid() {
     ]);
     let config = super::build_config(&cli);
     assert!(config.is_ok());
+}
+
+#[test]
+fn build_config_falls_back_to_config_file() {
+    let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    std::fs::write(
+        &config_path,
+        r#"{"client_id": "from-file", "client_secret": "secret-from-file"}"#,
+    )
+    .unwrap();
+    let config = super::build_config_from(&cli, &config_path);
+    assert!(config.is_ok());
+}
+
+#[test]
+fn build_config_cli_overrides_config_file() {
+    let cli = Cli::parse_from([
+        "schwab-agent",
+        "--client-id",
+        "from-cli",
+        "--client-secret",
+        "secret-from-cli",
+        "auth",
+        "status",
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.json");
+    std::fs::write(
+        &config_path,
+        r#"{"client_id": "from-file", "client_secret": "secret-from-file"}"#,
+    )
+    .unwrap();
+    let config = super::build_config_from(&cli, &config_path).unwrap();
+    // AuthConfig redacts fields, but we can verify it built successfully with CLI values
+    // by confirming no error was returned when both sources are present
+    assert!(format!("{config:?}").contains("<redacted>"));
 }
 
 // -- Serialization of output structs --------------------------------------

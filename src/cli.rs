@@ -27,13 +27,8 @@ pub struct Cli {
     pub client_secret: Option<String>,
 
     /// OAuth callback URL registered with Schwab.
-    #[arg(
-        long,
-        global = true,
-        env = "SCHWAB_CALLBACK_URL",
-        default_value = "https://127.0.0.1:8182"
-    )]
-    pub callback_url: String,
+    #[arg(long, global = true, env = "SCHWAB_CALLBACK_URL")]
+    pub callback_url: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
