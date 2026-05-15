@@ -751,7 +751,331 @@ fn summarize_error_all_none() {
     assert_eq!(err.invalid_ssids, None);
 }
 
-// -- QuoteOutput serialization: verifies sorted order and skip_serializing_if --
+// -- Quote output serialization: verifies compact and full-detail shapes --
+
+#[test]
+fn selected_quote_fields_defaults_to_compact_columns() {
+    let fields = selected_quote_fields(None).expect("default fields should be valid");
+
+    assert_eq!(
+        fields,
+        vec![
+            "req", "sym", "bid", "ask", "last", "mark", "chg", "pct", "vol", "err"
+        ]
+    );
+}
+
+#[test]
+fn default_quote_rows_show_requested_symbol_and_errors() {
+    let fields = selected_quote_fields(None).expect("default fields should be valid");
+    let summaries = vec![summarize_quote(
+        "BAD".to_string(),
+        QuoteResponseObject::Error(QuoteError {
+            invalid_symbols: Some(vec!["BAD".to_string()]),
+            invalid_cusips: None,
+            invalid_ssids: None,
+        }),
+    )];
+
+    let output = select_quote_fields(&summaries, &fields);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(
+        json["columns"],
+        serde_json::json!([
+            "req", "sym", "bid", "ask", "last", "mark", "chg", "pct", "vol", "err"
+        ])
+    );
+    assert_eq!(json["rowCount"], 1);
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([["BAD", null, null, null, null, null, null, null, null, {"invalid_symbols": ["BAD"]}]])
+    );
+}
+
+#[test]
+fn normalize_quote_summaries_replaces_generic_error_rows() {
+    let summaries = vec![QuoteSummary {
+        requested_symbol: "errors".to_string(),
+        ..QuoteSummary::default()
+    }];
+    let requested_symbols = vec!["BAD".to_string()];
+
+    let output = normalize_quote_summaries(summaries, &requested_symbols);
+
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].requested_symbol, "BAD");
+    assert_eq!(
+        output[0]
+            .error
+            .as_ref()
+            .and_then(|error| error.invalid_symbols.as_ref()),
+        Some(&vec!["BAD".to_string()])
+    );
+}
+
+#[test]
+fn normalize_quote_summaries_preserves_generic_error_details() {
+    let summaries = vec![QuoteSummary {
+        requested_symbol: "errors".to_string(),
+        error: Some(QuoteErrorSummary {
+            invalid_symbols: None,
+            invalid_cusips: Some(vec!["000000000".to_string()]),
+            invalid_ssids: Some(vec![12345]),
+        }),
+        ..QuoteSummary::default()
+    }];
+    let requested_symbols = vec!["000000000".to_string()];
+
+    let output = normalize_quote_summaries(summaries, &requested_symbols);
+
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].requested_symbol, "000000000");
+    let error = output[0]
+        .error
+        .as_ref()
+        .expect("generic API error details should be preserved");
+    assert_eq!(error.invalid_symbols, None);
+    assert_eq!(error.invalid_cusips, Some(vec!["000000000".to_string()]));
+    assert_eq!(error.invalid_ssids, Some(vec![12345]));
+}
+
+#[test]
+fn normalize_quote_summaries_applies_matching_generic_symbol_errors() {
+    let summaries = vec![QuoteSummary {
+        requested_symbol: "errors".to_string(),
+        error: Some(QuoteErrorSummary {
+            invalid_symbols: Some(vec!["BAD".to_string()]),
+            invalid_cusips: Some(vec!["111111111".to_string()]),
+            invalid_ssids: None,
+        }),
+        ..QuoteSummary::default()
+    }];
+    let requested_symbols = vec!["BAD".to_string(), "ALSO_BAD".to_string()];
+
+    let output = normalize_quote_summaries(summaries, &requested_symbols);
+
+    assert_eq!(output.len(), 2);
+    let also_bad = output
+        .iter()
+        .find(|summary| summary.requested_symbol == "ALSO_BAD")
+        .expect("missing requested symbol should receive fallback error");
+    assert_eq!(
+        also_bad
+            .error
+            .as_ref()
+            .and_then(|error| error.invalid_symbols.as_ref()),
+        Some(&vec!["ALSO_BAD".to_string()])
+    );
+
+    let bad = output
+        .iter()
+        .find(|summary| summary.requested_symbol == "BAD")
+        .expect("matching requested symbol should receive API error details");
+    let error = bad
+        .error
+        .as_ref()
+        .expect("matching generic error should be preserved");
+    assert_eq!(error.invalid_symbols, Some(vec!["BAD".to_string()]));
+    assert_eq!(error.invalid_cusips, Some(vec!["111111111".to_string()]));
+}
+
+#[test]
+fn normalize_quote_summaries_keeps_matching_api_rows() {
+    let summaries = vec![QuoteSummary {
+        requested_symbol: "aapl".to_string(),
+        symbol: Some("AAPL".to_string()),
+        ..QuoteSummary::default()
+    }];
+    let requested_symbols = vec!["AAPL".to_string()];
+
+    let output = normalize_quote_summaries(summaries, &requested_symbols);
+
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].requested_symbol, "aapl");
+    assert_eq!(output[0].symbol, Some("AAPL".to_string()));
+    assert!(output[0].error.is_none());
+}
+
+#[test]
+fn sort_quote_summaries_preserves_generic_errors_for_all_fields() {
+    let summaries = vec![
+        QuoteSummary {
+            requested_symbol: "MSFT".to_string(),
+            symbol: Some("MSFT".to_string()),
+            ..QuoteSummary::default()
+        },
+        QuoteSummary {
+            requested_symbol: "errors".to_string(),
+            error: Some(QuoteErrorSummary {
+                invalid_symbols: Some(vec!["BAD".to_string()]),
+                invalid_cusips: None,
+                invalid_ssids: None,
+            }),
+            ..QuoteSummary::default()
+        },
+    ];
+
+    let output = sort_quote_summaries(summaries);
+
+    assert_eq!(output.len(), 2);
+    assert_eq!(output[0].requested_symbol, "MSFT");
+    assert_eq!(output[1].requested_symbol, "errors");
+    assert_eq!(
+        output[1]
+            .error
+            .as_ref()
+            .and_then(|error| error.invalid_symbols.as_ref()),
+        Some(&vec!["BAD".to_string()])
+    );
+}
+
+#[test]
+fn selected_quote_fields_accepts_aliases() {
+    let fields = selected_quote_fields(Some("symbol,net_change,net_percent_change,volume"))
+        .expect("known aliases should be valid");
+
+    assert_eq!(fields, vec!["sym", "chg", "pct", "vol"]);
+}
+
+#[test]
+fn selected_quote_fields_rejects_unknown_fields() {
+    let error = selected_quote_fields(Some("symbol,nope"))
+        .expect_err("unknown field should fail validation");
+
+    assert!(matches!(error, AppError::MarketValidation { .. }));
+    assert!(error.to_string().contains("unknown quote field(s): nope"));
+}
+
+#[test]
+fn selected_quote_fields_rejects_empty_lists() {
+    let error =
+        selected_quote_fields(Some(",, ")).expect_err("empty field list should fail validation");
+
+    assert!(matches!(error, AppError::MarketValidation { .. }));
+    assert!(error.to_string().contains("quote --fields cannot be empty"));
+}
+
+#[test]
+fn quote_rows_output_serializes_compact_table() {
+    let summaries = vec![summarize_quote(
+        "AAPL".to_string(),
+        QuoteResponseObject::Equity(EquityResponse {
+            asset_main_type: Some(AssetMainType::Equity),
+            asset_sub_type: None,
+            extended: None,
+            fundamental: None,
+            quote: Some(EquityQuote {
+                week_high_52: None,
+                week_low_52: None,
+                ask_mic_id: None,
+                ask_price: Some(num(151.50)),
+                ask_size: None,
+                ask_time: None,
+                bid_mic_id: None,
+                bid_price: Some(num(151.40)),
+                bid_size: None,
+                bid_time: None,
+                close_price: None,
+                high_price: None,
+                last_mic_id: None,
+                last_price: Some(num(151.45)),
+                last_size: None,
+                low_price: None,
+                mark: Some(num(151.46)),
+                mark_change: None,
+                mark_percent_change: None,
+                net_change: Some(num(1.25)),
+                net_percent_change: Some(num(0.83)),
+                open_price: None,
+                quote_time: None,
+                security_status: None,
+                total_volume: Some(45_000_000),
+                trade_time: None,
+                volatility: None,
+            }),
+            quote_type: None,
+            realtime: None,
+            reference: None,
+            regular: None,
+            ssid: None,
+            symbol: Some("AAPL".to_string()),
+        }),
+    )];
+
+    let output = select_quote_fields(&summaries, &["sym", "bid", "ask", "chg", "pct", "vol"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(
+        json["columns"],
+        serde_json::json!(["sym", "bid", "ask", "chg", "pct", "vol"])
+    );
+    assert_eq!(json["rowCount"], 1);
+    #[cfg(not(feature = "decimal"))]
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([["AAPL", 151.4, 151.5, 1.25, 0.83, 45_000_000]])
+    );
+    #[cfg(feature = "decimal")]
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([["AAPL", "151.4", "151.5", "1.25", "0.83", 45_000_000]])
+    );
+}
+
+#[test]
+fn quote_rows_output_includes_null_for_missing_selected_fields() {
+    let summaries = vec![summarize_quote(
+        "$DJI".to_string(),
+        QuoteResponseObject::Index(IndexResponse {
+            asset_main_type: Some(AssetMainType::Index),
+            quote: None,
+            realtime: None,
+            reference: None,
+            ssid: None,
+            symbol: Some("$DJI".to_string()),
+        }),
+    )];
+
+    let output = select_quote_fields(&summaries, &["sym", "bid", "ask"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(json["columns"], serde_json::json!(["sym", "bid", "ask"]));
+    assert_eq!(json["rowCount"], 1);
+    assert_eq!(json["rows"], serde_json::json!([["$DJI", null, null]]));
+}
+
+#[test]
+fn quote_rows_output_can_select_error_details() {
+    let summaries = vec![summarize_quote(
+        "BAD".to_string(),
+        QuoteResponseObject::Error(QuoteError {
+            invalid_symbols: Some(vec!["BAD".to_string()]),
+            invalid_cusips: None,
+            invalid_ssids: None,
+        }),
+    )];
+
+    let output = select_quote_fields(&summaries, &["req", "err"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(json["columns"], serde_json::json!(["req", "err"]));
+    assert_eq!(json["rowCount"], 1);
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([["BAD", {"invalid_symbols": ["BAD"]}]])
+    );
+}
+
+#[test]
+fn quote_rows_output_handles_empty_summaries() {
+    let output = select_quote_fields(&[], &["sym", "last"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(json["columns"], serde_json::json!(["sym", "last"]));
+    assert_eq!(json["rowCount"], 0);
+    assert_eq!(json["rows"], serde_json::json!([]));
+}
 
 #[test]
 fn quote_output_serializes_sorted() {
