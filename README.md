@@ -142,6 +142,32 @@ schwab-agent option screen AAPL --expiration 2025-06-20 --delta-min 0.20 --delta
 schwab-agent option contract AAPL --expiration 2025-06-20 --strike 200 --call
 ```
 
+### ta
+
+Technical analysis: `dashboard`, `expected-move`.
+
+```bash
+schwab-agent ta dashboard AAPL                          # daily TA dashboard, 20 data points
+schwab-agent ta dashboard SPY --interval weekly --points 10
+schwab-agent ta expected-move AAPL                      # expected move from ATM straddle
+schwab-agent ta expected-move SPY --dte 45              # 45-day expected move
+```
+
+Dashboard flags: `--interval` (daily, weekly, 1min, 5min, 15min, 30min; default: daily), `--points` (number of data points; default: 20).
+Expected-move flags: `--dte` (days to expiration; default: 30).
+
+### analyze
+
+Multi-symbol analysis with partial-failure support.
+
+```bash
+schwab-agent analyze AAPL                    # single symbol
+schwab-agent analyze AAPL MSFT GOOG SPY      # multiple symbols
+schwab-agent analyze AAPL --interval weekly --points 10
+```
+
+Returns quote + TA dashboard for each symbol. If some symbols fail, the envelope still returns `ok: true` with partial data and warnings for failed symbols. All symbols failing produces `ok: false`.
+
 ## Order Workflow
 
 The recommended agent workflow uses tamper-evident previews:
