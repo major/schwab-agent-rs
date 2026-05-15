@@ -1,6 +1,7 @@
 //! Agent-oriented JSON CLI porcelain for the `schwab` crate.
 
 pub mod account;
+mod analyze;
 mod auth;
 mod cli;
 mod equity;
@@ -11,13 +12,14 @@ mod order;
 mod output;
 mod portfolio;
 mod shared;
+mod ta;
 mod verify;
 
 use std::io::{self, Write};
 
 use clap::Parser;
 
-use crate::cli::{Cli, Command, OptionCommand};
+use crate::cli::{Cli, Command, OptionCommand, TaCommand};
 use crate::error::AppError;
 use crate::output::{CommandOutput, Envelope, ErrorBody, Metadata};
 
@@ -50,6 +52,20 @@ pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
     if let Command::Stock(command) = &cli.command {
         return equity::handle(&cli, command).await;
     }
+    if let Command::Analyze(args) = &cli.command {
+        let client = auth::provider(&cli)?.client().await?;
+        let envelope = analyze::analyze(&client, args).await?;
+        let data = envelope.data.map(serde_json::to_value).transpose()?;
+        return Ok(CommandOutput {
+            version: envelope.version,
+            ok: envelope.ok,
+            command: envelope.command,
+            data,
+            error: envelope.error,
+            warnings: envelope.warnings,
+            meta: envelope.meta,
+        });
+    }
 
     let command = cli.command_name();
     let data = match &cli.command {
@@ -66,8 +82,16 @@ pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
                 OptionCommand::Contract(args) => options::contract::handle(&client, args).await?,
             }
         }
-        Command::Analyze(_) => todo!("wired in Task 11"),
-        Command::Ta(_) => todo!("wired in Task 11"),
+        Command::Analyze(_) => unreachable!("handled above"),
+        Command::Ta(ta_cmd) => {
+            let client = auth::provider(&cli)?.client().await?;
+            match ta_cmd {
+                TaCommand::Dashboard(args) => ta::dashboard(&client, args).await?,
+                TaCommand::ExpectedMove(args) => {
+                    ta::expected_move::expected_move(&client, args).await?
+                }
+            }
+        }
         Command::Order(_) => unreachable!("handled above"),
         Command::Portfolio(command) => portfolio::handle(&cli, command).await?,
         Command::Stock(_) => unreachable!("handled above"),

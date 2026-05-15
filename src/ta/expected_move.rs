@@ -1,9 +1,5 @@
 //! Expected move command handler.
 
-// The TA command dispatch is wired in a later migration step, so this module is
-// intentionally implemented and tested before production call sites exist.
-#![allow(dead_code)]
-
 use schwab::{Client, OptionChain, OptionChainOptions, OptionContract};
 use serde_json::{Value, to_value};
 
@@ -51,7 +47,6 @@ struct AtmContracts<'a> {
 /// The `dte` parameter is accepted to keep the calculation signature aligned
 /// with the command inputs, but the raw ATM straddle formula is intentionally
 /// not annualized by time.
-#[must_use]
 pub fn compute_expected_move(
     underlying_price: f64,
     call_price: f64,

@@ -25,7 +25,6 @@ use crate::ta::types::{
 /// Returns [`AppError`] only for unexpected serialization failures that prevent
 /// building the command output. Per-symbol quote and dashboard failures are
 /// captured inside the returned envelope as warnings and result fields.
-#[allow(dead_code)]
 pub async fn analyze(
     client: &Client,
     args: &AnalyzeArgs,
