@@ -11,12 +11,25 @@ use serde::Deserialize;
 
 use crate::error::AppError;
 
+/// The default OAuth callback URL used when no CLI arg, env var, or config
+/// file provides one.
+pub(crate) const DEFAULT_CALLBACK_URL: &str = "https://127.0.0.1:8182";
+
 /// Subset of the shared agent config relevant to this CLI.
 ///
 /// Unknown keys are silently ignored so the Go CLI can add fields without
 /// breaking the Rust CLI.
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct AgentConfig {
+    /// Schwab app client ID, shared with the Go CLI.
+    pub client_id: Option<String>,
+
+    /// Schwab app client secret, shared with the Go CLI.
+    pub client_secret: Option<String>,
+
+    /// OAuth callback URL registered with Schwab.
+    pub callback_url: Option<String>,
+
     /// When `true`, mutable order operations (place, replace, cancel) are
     /// allowed. Defaults to `false` when the key is absent or the config
     /// file does not exist.
@@ -44,7 +57,7 @@ fn config_path() -> PathBuf {
 ///
 /// Returns `AgentConfig::default()` (all flags false) when the file is
 /// missing, which makes "file not found" a safe no-op rather than an error.
-fn load_agent_config_from(path: &std::path::Path) -> Result<AgentConfig, AppError> {
+pub(crate) fn load_agent_config_from(path: &std::path::Path) -> Result<AgentConfig, AppError> {
     match std::fs::read_to_string(path) {
         Ok(contents) => Ok(serde_json::from_str(&contents)?),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(AgentConfig::default()),
@@ -182,5 +195,29 @@ mod tests {
 
         let result = require_mutable_enabled_from(&path);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn deserializes_credential_fields() {
+        let json = r#"{
+            "client_id": "my_id",
+            "client_secret": "my_secret",
+            "callback_url": "https://localhost:9999"
+        }"#;
+        let config: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.client_id.as_deref(), Some("my_id"));
+        assert_eq!(config.client_secret.as_deref(), Some("my_secret"));
+        assert_eq!(
+            config.callback_url.as_deref(),
+            Some("https://localhost:9999")
+        );
+    }
+
+    #[test]
+    fn credential_fields_default_to_none() {
+        let config = AgentConfig::default();
+        assert!(config.client_id.is_none());
+        assert!(config.client_secret.is_none());
+        assert!(config.callback_url.is_none());
     }
 }

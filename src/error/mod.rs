@@ -121,7 +121,7 @@ impl AppError {
     pub fn hint(&self) -> Option<&'static str> {
         match self {
             Self::MissingAuthConfig(_) => Some(
-                "Set SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET, or pass --client-id and --client-secret.",
+                "Add client_id and client_secret to ~/.config/schwab-agent/config.json, set SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET, or pass --client-id and --client-secret.",
             ),
             Self::TokenFileMissing(_) => {
                 Some("Run auth login-url, then auth exchange, to create a token file.")

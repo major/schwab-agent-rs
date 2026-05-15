@@ -29,21 +29,56 @@ pub(crate) async fn handle(cli: &Cli, command: &AuthCommand) -> Result<Value, Ap
     }
 }
 
-/// Builds an `AuthConfig` from CLI flags, returning an error if required credentials are absent.
+/// Builds an `AuthConfig` from CLI flags, falling back to the shared config
+/// file at `~/.config/schwab-agent/config.json` for any values not provided
+/// via CLI args or environment variables.
+///
+/// Resolution order for each credential: CLI arg / env var > config file.
+/// The callback URL additionally falls back to the hardcoded default.
 pub(crate) fn build_config(cli: &Cli) -> Result<AuthConfig, AppError> {
+    let config = crate::config::load_agent_config()?;
     let client_id = cli
         .client_id
         .as_deref()
+        .or(config.client_id.as_deref())
         .ok_or(AppError::MissingAuthConfig("client_id"))?;
     let client_secret = cli
         .client_secret
         .as_deref()
+        .or(config.client_secret.as_deref())
         .ok_or(AppError::MissingAuthConfig("client_secret"))?;
-    Ok(AuthConfig::new(
-        client_id,
-        client_secret,
-        &cli.callback_url,
-    )?)
+    let callback_url = cli
+        .callback_url
+        .as_deref()
+        .or(config.callback_url.as_deref())
+        .unwrap_or(crate::config::DEFAULT_CALLBACK_URL);
+    Ok(AuthConfig::new(client_id, client_secret, callback_url)?)
+}
+
+/// Testable variant of [`build_config`] that loads agent config from a specific path
+/// instead of the default location, isolating tests from the real config file.
+#[cfg(test)]
+pub(crate) fn build_config_from(
+    cli: &Cli,
+    config_path: &std::path::Path,
+) -> Result<AuthConfig, AppError> {
+    let config = crate::config::load_agent_config_from(config_path)?;
+    let client_id = cli
+        .client_id
+        .as_deref()
+        .or(config.client_id.as_deref())
+        .ok_or(AppError::MissingAuthConfig("client_id"))?;
+    let client_secret = cli
+        .client_secret
+        .as_deref()
+        .or(config.client_secret.as_deref())
+        .ok_or(AppError::MissingAuthConfig("client_secret"))?;
+    let callback_url = cli
+        .callback_url
+        .as_deref()
+        .or(config.callback_url.as_deref())
+        .unwrap_or(crate::config::DEFAULT_CALLBACK_URL);
+    Ok(AuthConfig::new(client_id, client_secret, callback_url)?)
 }
 
 /// Returns a `Provider` backed by the saved token file, failing if the file does not exist.
@@ -120,8 +155,14 @@ fn login_url(cli: &Cli, args: &LoginUrlArgs) -> Result<Value, AppError> {
 ///
 /// This is the second step of the manual login flow started by `login_url`.
 async fn exchange(cli: &Cli, args: &AuthExchangeArgs) -> Result<Value, AppError> {
+    let config = crate::config::load_agent_config()?;
+    let callback_url = cli
+        .callback_url
+        .clone()
+        .or(config.callback_url)
+        .unwrap_or_else(|| crate::config::DEFAULT_CALLBACK_URL.to_string());
     let context = AuthContext {
-        callback_url: cli.callback_url.clone(),
+        callback_url,
         authorization_url: String::new(),
         state: args.state.clone(),
     };
