@@ -1,6 +1,6 @@
 //! Post-action verification for order lifecycle commands.
 //!
-//! After placing or canceling an order, the Schwab API returns minimal data
+//! After placing, replacing, or canceling an order, the Schwab API returns minimal data
 //! (just a Location header with an order ID for placement, or nothing for
 //! cancellation). This module provides a follow-up GET to retrieve the full
 //! order status, giving LLM agents immediate confirmation of whether the
@@ -26,7 +26,7 @@ pub(crate) enum VerificationState {
     Unverified,
 }
 
-/// Result of a mutable order action (place, cancel) with post-action
+/// Result of a mutable order action (place, replace, cancel) with post-action
 /// verification.
 ///
 /// The `order` field preserves the submitted order payload that existed before
@@ -35,13 +35,13 @@ pub(crate) enum VerificationState {
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct OrderActionResult {
-    /// What action was performed: "place", "cancel".
+    /// What action was performed: "place", "replace", or "cancel".
     pub action: String,
     /// Order ID from the action (parsed from Location header for place).
     pub order_id: Option<i64>,
-    /// Raw Location header from the API response (place only).
+    /// Raw Location header from the API response when provided.
     pub location: Option<String>,
-    /// The order payload that was submitted (place only).
+    /// The order payload submitted for mutable actions that send a body.
     pub order: Option<Value>,
     /// Whether the follow-up GET succeeded.
     pub verification_state: VerificationState,
