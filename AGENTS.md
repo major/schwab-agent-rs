@@ -1,12 +1,14 @@
 # AGENTS.md - schwab-agent-rs
 
+> **KEEP DOCS IN SYNC.** Any change to commands, args, output format, error codes, features, or workflows MUST be reflected in both `AGENTS.md` and `README.md` as part of the same PR. Stale docs are worse than no docs.
+
 ## What This Is
 
 Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is resolved from crates.io for CI compatibility.
 
 - Edition 2024, MSRV 1.95
 - `publish = false` (private crate)
-- Feature flag: `decimal` (enables `schwab/decimal`) - must be built and tested separately
+- Feature flag: `decimal` (enables `schwab/decimal`) - enabled by default
 
 ## Source Layout
 
@@ -71,7 +73,7 @@ Each action hardcodes the Schwab `Instruction` to prevent accidental trade rever
 
 ### Option Strategies (15 total)
 
-long-call, long-put, cash-secured-put, naked-call, sell-covered-call, bull-call-spread, bear-call-spread, bull-put-spread, bear-put-spread, long-straddle, short-straddle, long-strangle, short-strangle, short-iron-condor, jade-lizard
+long-call, long-put, cash-secured-put, naked-call, sell-covered-call, call-debit-spread, call-credit-spread, put-debit-spread, put-credit-spread, long-straddle, short-straddle, long-strangle, short-strangle, short-iron-condor, jade-lizard
 
 Each strategy hardcodes contract type and direction to prevent accidental trade reversal.
 
