@@ -79,7 +79,10 @@ macro_rules! opt_field {
 /// Normalizes all eight [`QuoteResponseObject`] variants (Equity, Option, MutualFund,
 /// Forex, Future, FutureOption, Index, Error) into a single flat [`QuoteSummary`].
 /// Fields that don't apply to a given asset type are left at their `Default` value (`None`).
-fn summarize_quote(requested_symbol: String, quote: QuoteResponseObject) -> QuoteSummary {
+pub(crate) fn summarize_quote(
+    requested_symbol: String,
+    quote: QuoteResponseObject,
+) -> QuoteSummary {
     match quote {
         QuoteResponseObject::Equity(response) => {
             let quote = response.quote;
@@ -262,9 +265,9 @@ struct QuoteOutput {
 /// Fields that don't apply to a given asset type are omitted from JSON output.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Default, Serialize)]
-struct QuoteSummary {
+pub(crate) struct QuoteSummary {
     /// The symbol string the caller originally requested.
-    requested_symbol: String,
+    pub(crate) requested_symbol: String,
     /// The canonical symbol returned by the API, which may differ from the requested symbol.
     symbol: Option<String>,
     /// Asset class as a debug-formatted string (e.g. `"Equity"`, `"Option"`, `"Future"`).
