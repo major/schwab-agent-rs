@@ -38,6 +38,9 @@ src/
   portfolio/
     mod.rs         - Portfolio snapshot with optional positions
     tests.rs       - Portfolio module tests
+  account/
+    mod.rs         - Account commands: summary, resolve; account resolver; balance renderer
+    tests.rs       - Account module tests
   options/
     mod.rs         - Module root: re-exports subcommand modules
     types.rs       - Shared types: FieldDef, FlatContract, flatten_chain, sort_contracts, select_fields, validate_fields, compute_dte, filter predicates
@@ -52,6 +55,7 @@ src/
 
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
+- **account** - Account discovery and resolution (summary, resolve)
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
 - **order** - Option order workflow (build, preview, place, place-from-preview) + lifecycle (list, get, cancel)
 - **portfolio** - Account snapshot with optional positions

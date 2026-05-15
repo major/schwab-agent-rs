@@ -21,6 +21,9 @@ pub enum AppError {
     /// Order validation failed (invalid strikes, missing fields, etc.).
     #[error("{0}")]
     OrderValidation(String),
+    /// Account selection or validation failed.
+    #[error("{0}")]
+    AccountValidation(String),
     /// The symbol does not have listed options or was not found.
     #[error("symbol has no listed options: {symbol}")]
     OptionsSymbolNotFound { symbol: String },
@@ -41,6 +44,7 @@ impl AppError {
             Self::Io(_) | Self::Json(_) => 20,
             Self::Schwab(error) => classify_schwab_error(error).0,
             Self::OrderValidation(_) => 10,
+            Self::AccountValidation(_) => 10,
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => 10,
             Self::Preview(_) => 11,
         }
@@ -56,6 +60,7 @@ impl AppError {
             Self::Json(_) => "json.error",
             Self::Schwab(error) => classify_schwab_error(error).1,
             Self::OrderValidation(_) => "order.validation_failed",
+            Self::AccountValidation(_) => "account.validation_failed",
             Self::OptionsSymbolNotFound { .. } => "options.symbol_not_found",
             Self::OptionsValidation { .. } => "options.validation_failed",
             Self::Preview(_) => "order.preview_failed",
@@ -71,6 +76,7 @@ impl AppError {
             Self::Json(_) => "json",
             Self::Schwab(error) => classify_schwab_error(error).2,
             Self::OrderValidation(_) | Self::Preview(_) => "order",
+            Self::AccountValidation(_) => "account",
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => "options",
         }
     }
@@ -93,6 +99,9 @@ impl AppError {
             }
             Self::OptionsSymbolNotFound { .. } => {
                 Some("Check that the symbol is correct and has listed options")
+            }
+            Self::AccountValidation(_) => {
+                Some("Run account summary to list available account hashes and nicknames.")
             }
             Self::Schwab(schwab::Error::AuthExpired | schwab::Error::AuthRequired) => {
                 Some("Run auth refresh, or re-authenticate with auth login-url and auth exchange.")

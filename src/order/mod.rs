@@ -29,6 +29,7 @@ pub(crate) mod preview;
 use clap::{Args, Subcommand};
 use serde_json::Value;
 
+use crate::account;
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
@@ -632,7 +633,7 @@ pub enum OrderCommand {
 /// Arguments for `order preview <strategy>`.
 #[derive(Debug, Args)]
 pub struct OrderPreviewArgs {
-    /// Account hash for the preview (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -648,7 +649,7 @@ pub struct OrderPreviewArgs {
 /// Arguments for `order place <strategy>`.
 #[derive(Debug, Args)]
 pub struct OrderPlaceArgs {
-    /// Account hash to place the order in (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -660,7 +661,7 @@ pub struct OrderPlaceArgs {
 /// Arguments for `order place-from-preview`.
 #[derive(Debug, Args)]
 pub struct PlaceFromPreviewArgs {
-    /// Account hash (must match the account used during preview).
+    /// Account hash or nickname (must resolve to the hash used during preview).
     #[arg(long)]
     pub account: String,
 
@@ -953,7 +954,9 @@ async fn do_preview(
 ) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
     let client = auth::provider(cli)?.client().await?;
-    let _preview = client.preview_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let _preview = client.preview_order(&account_hash, &order).await?;
 
     let order_json = serialize_order(&order)?;
 
@@ -963,7 +966,7 @@ async fn do_preview(
     });
 
     if save {
-        let digest = preview::save_preview(account, &order, command_name)?;
+        let digest = preview::save_preview(&account_hash, &order, command_name)?;
         data["digest"] = Value::String(digest);
         data["digest_ttl_seconds"] = Value::Number(900.into());
     }
@@ -980,12 +983,14 @@ async fn do_place(
 ) -> Result<CommandOutput, AppError> {
     let order = build_order(strategy)?;
     let client = auth::provider(cli)?.client().await?;
-    let response = client.place_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let response = client.place_order(&account_hash, &order).await?;
     let order_json = serialize_order(&order)?;
 
     let result = verify::verify_order(
         &client,
-        account,
+        &account_hash,
         response.order_id,
         "place",
         response.location,
@@ -1003,13 +1008,15 @@ async fn do_place_from_preview(
     account: &str,
     digest: &str,
 ) -> Result<CommandOutput, AppError> {
-    let saved = preview::load_preview(digest, account)?;
     let client = auth::provider(cli)?.client().await?;
-    let response = client.place_order(account, &saved.order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let saved = preview::load_preview(digest, &account_hash)?;
+    let response = client.place_order(&account_hash, &saved.order).await?;
 
     let mut result = verify::verify_order(
         &client,
-        account,
+        &account_hash,
         response.order_id,
         "place",
         response.location,
@@ -1032,6 +1039,32 @@ mod tests {
     use clap::Parser;
 
     use crate::cli::Cli;
+
+    #[test]
+    fn resolve_by_nickname_returns_canonical_hash() {
+        use crate::account::resolve_account_from_data;
+        use schwab::{AccountNumberHash, UserPreferenceAccount};
+
+        let hashes = vec![AccountNumberHash {
+            account_number: Some("123456".to_string()),
+            hash_value: Some("HASH123".to_string()),
+        }];
+        let prefs = vec![UserPreferenceAccount {
+            account_color: None,
+            account_number: Some("123456".to_string()),
+            auto_position_effect: None,
+            display_acct_id: None,
+            nick_name: Some("Trading".to_string()),
+            primary_account: None,
+            r#type: None,
+        }];
+
+        let result = resolve_account_from_data(&hashes, &prefs, "Trading");
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.account_hash, "HASH123");
+        assert_eq!(resolved.matched_by, "nickname");
+    }
 
     #[test]
     fn parse_build_long_call() {

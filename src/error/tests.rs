@@ -73,6 +73,19 @@ fn options_validation_classification() {
     assert!(err.hint().is_none());
 }
 
+#[test]
+fn account_validation_classification() {
+    let err = AppError::AccountValidation("test".to_string());
+    assert_eq!(err.exit_code(), 10);
+    assert_eq!(err.code(), "account.validation_failed");
+    assert_eq!(err.category(), "account");
+    assert!(!err.retryable());
+    assert_eq!(
+        err.hint(),
+        Some("Run account summary to list available account hashes and nicknames.")
+    );
+}
+
 // -- schwab::Error variants wrapped in AppError::Schwab ------------------------
 
 #[test]

@@ -28,6 +28,7 @@ mod tests;
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::Value;
 
+use crate::account;
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
@@ -161,7 +162,7 @@ pub enum EquityCommand {
 /// Arguments for `stock preview <action>`.
 #[derive(Debug, Args)]
 pub struct EquityPreviewArgs {
-    /// Account hash for the preview (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -177,7 +178,7 @@ pub struct EquityPreviewArgs {
 /// Arguments for `stock place <action>`.
 #[derive(Debug, Args)]
 pub struct EquityPlaceArgs {
-    /// Account hash to place the order in (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -189,7 +190,7 @@ pub struct EquityPlaceArgs {
 /// Arguments for `stock place-from-preview`.
 #[derive(Debug, Args)]
 pub struct PlaceFromPreviewArgs {
-    /// Account hash (must match the account used during preview).
+    /// Account hash or nickname (must resolve to the hash used during preview).
     #[arg(long)]
     pub account: String,
 
@@ -201,7 +202,7 @@ pub struct PlaceFromPreviewArgs {
 /// Arguments for `stock preview-raw`.
 #[derive(Debug, Args)]
 pub struct RawPreviewArgs {
-    /// Account hash for the preview (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -217,7 +218,7 @@ pub struct RawPreviewArgs {
 /// Arguments for `stock place-raw`.
 #[derive(Debug, Args)]
 pub struct RawPlaceArgs {
-    /// Account hash to place the order in (from `portfolio snapshot`).
+    /// Account hash or nickname (use `account summary` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -372,7 +373,9 @@ async fn do_preview(
 ) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
     let client = auth::provider(cli)?.client().await?;
-    let _preview = client.preview_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let _preview = client.preview_order(&account_hash, &order).await?;
 
     let order_json = serialize_order(&order)?;
 
@@ -382,7 +385,7 @@ async fn do_preview(
     });
 
     if save {
-        let digest = preview::save_preview(account, &order, command_name)?;
+        let digest = preview::save_preview(&account_hash, &order, command_name)?;
         data["digest"] = Value::String(digest);
         data["digest_ttl_seconds"] = Value::Number(900.into());
     }
@@ -399,12 +402,14 @@ async fn do_place(
 ) -> Result<CommandOutput, AppError> {
     let order = build_equity_order(action)?;
     let client = auth::provider(cli)?.client().await?;
-    let response = client.place_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let response = client.place_order(&account_hash, &order).await?;
     let order_json = serialize_order(&order)?;
 
     let result = verify::verify_order(
         &client,
-        account,
+        &account_hash,
         response.order_id,
         "place",
         response.location,
@@ -422,13 +427,15 @@ async fn do_place_from_preview(
     account: &str,
     digest: &str,
 ) -> Result<CommandOutput, AppError> {
-    let saved = preview::load_preview(digest, account)?;
     let client = auth::provider(cli)?.client().await?;
-    let response = client.place_order(account, &saved.order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let saved = preview::load_preview(digest, &account_hash)?;
+    let response = client.place_order(&account_hash, &saved.order).await?;
 
     let mut result = verify::verify_order(
         &client,
-        account,
+        &account_hash,
         response.order_id,
         "place",
         response.location,
@@ -461,7 +468,9 @@ async fn do_preview_raw(
 ) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
     let client = auth::provider(cli)?.client().await?;
-    let _preview = client.preview_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let _preview = client.preview_order(&account_hash, &order).await?;
 
     let mut data = serde_json::json!({
         "order": order,
@@ -469,7 +478,7 @@ async fn do_preview_raw(
     });
 
     if save {
-        let digest = preview::save_preview(account, &order, "stock.preview-raw")?;
+        let digest = preview::save_preview(&account_hash, &order, "stock.preview-raw")?;
         data["digest"] = Value::String(digest);
         data["digest_ttl_seconds"] = Value::Number(900.into());
     }
@@ -482,11 +491,13 @@ async fn do_preview_raw(
 async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<CommandOutput, AppError> {
     let order = parse_raw_json(json)?;
     let client = auth::provider(cli)?.client().await?;
-    let response = client.place_order(account, &order).await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let response = client.place_order(&account_hash, &order).await?;
 
     let result = verify::verify_order(
         &client,
-        account,
+        &account_hash,
         response.order_id,
         "place",
         response.location,

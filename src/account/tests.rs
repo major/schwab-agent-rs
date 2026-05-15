@@ -1,0 +1,710 @@
+use crate::account::{
+    AccountBalances, AccountResolveData, AccountRow, AccountSummaryData, CashBalanceSummary,
+    MarginBalanceSummary, build_account_row, render_summary_from_data, resolve_account_from_data,
+};
+use crate::error::AppError;
+use schwab::{AccountEquity, AccountsInstrument, InstrumentAssetType};
+
+fn number(value: f64) -> schwab::Number {
+    serde_json::from_value(serde_json::json!(value)).unwrap()
+}
+
+#[test]
+fn account_summary_serializes_correctly() {
+    let summary = AccountSummaryData {
+        accounts: vec![
+            AccountRow {
+                account_hash: "hash-1".to_string(),
+                nickname: Some("margin".to_string()),
+                display_account_id: Some("****1234".to_string()),
+                primary_account: Some(true),
+                account_type: Some("MARGIN".to_string()),
+                balances: Some(AccountBalances::Margin(MarginBalanceSummary {
+                    cash_available_for_trading: Some(number(10.0)),
+                    cash_available_for_withdrawal: Some(number(11.0)),
+                    buying_power: Some(number(12.0)),
+                    stock_buying_power: Some(number(13.0)),
+                    option_buying_power: Some(number(14.0)),
+                    equity: Some(number(15.0)),
+                })),
+                positions: None,
+            },
+            AccountRow {
+                account_hash: "hash-2".to_string(),
+                nickname: Some("cash".to_string()),
+                display_account_id: Some("****5678".to_string()),
+                primary_account: Some(false),
+                account_type: Some("CASH".to_string()),
+                balances: Some(AccountBalances::Cash(CashBalanceSummary {
+                    cash_available_for_trading: Some(number(20.0)),
+                    cash_available_for_withdrawal: Some(number(21.0)),
+                    total_cash: Some(number(22.0)),
+                })),
+                positions: None,
+            },
+        ],
+    };
+
+    let serialized = serde_json::to_value(summary).unwrap();
+    let accounts = serialized["accounts"].as_array().unwrap();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0]["account_hash"], "hash-1");
+    assert_eq!(accounts[1]["account_hash"], "hash-2");
+    assert!(accounts[0].get("positions").is_none());
+    assert!(accounts[1].get("positions").is_none());
+}
+
+#[test]
+fn account_resolve_serializes_correctly() {
+    let resolve = AccountResolveData {
+        account_hash: "hash-1".to_string(),
+        matched_by: "nickname".to_string(),
+        nickname: Some("primary".to_string()),
+        display_account_id: Some("****1234".to_string()),
+        primary_account: Some(true),
+        account_type: Some("MARGIN".to_string()),
+    };
+
+    let serialized = serde_json::to_value(resolve).unwrap();
+    assert_eq!(serialized["account_hash"], "hash-1");
+    assert_eq!(serialized["matched_by"], "nickname");
+    assert_eq!(serialized["nickname"], "primary");
+    assert_eq!(serialized["display_account_id"], "****1234");
+    assert_eq!(serialized["primary_account"], true);
+    assert_eq!(serialized["account_type"], "MARGIN");
+}
+
+#[test]
+fn account_row_omits_absent_optional_fields() {
+    let row = AccountRow {
+        account_hash: "hash-1".to_string(),
+        nickname: None,
+        display_account_id: None,
+        primary_account: None,
+        account_type: None,
+        balances: None,
+        positions: None,
+    };
+
+    let serialized = serde_json::to_value(row).unwrap();
+    assert_eq!(serialized["account_hash"], "hash-1");
+    assert!(serialized.get("nickname").is_none());
+    assert!(serialized.get("display_account_id").is_none());
+    assert!(serialized.get("primary_account").is_none());
+    assert!(serialized.get("account_type").is_none());
+    assert!(serialized.get("balances").is_none());
+    assert!(serialized.get("positions").is_none());
+}
+
+#[test]
+fn account_balances_margin_has_kind_margin() {
+    let balances = AccountBalances::Margin(MarginBalanceSummary {
+        cash_available_for_trading: Some(number(1.0)),
+        cash_available_for_withdrawal: Some(number(2.0)),
+        buying_power: Some(number(3.0)),
+        stock_buying_power: Some(number(4.0)),
+        option_buying_power: Some(number(5.0)),
+        equity: Some(number(6.0)),
+    });
+
+    let serialized = serde_json::to_string(&balances).unwrap();
+    assert!(serialized.contains("\"kind\":\"margin\""));
+}
+
+#[test]
+fn account_balances_cash_has_kind_cash() {
+    let balances = AccountBalances::Cash(CashBalanceSummary {
+        cash_available_for_trading: Some(number(1.0)),
+        cash_available_for_withdrawal: Some(number(2.0)),
+        total_cash: Some(number(3.0)),
+    });
+
+    let serialized = serde_json::to_string(&balances).unwrap();
+    assert!(serialized.contains("\"kind\":\"cash\""));
+}
+
+#[test]
+fn account_error_exit_code_is_10() {
+    let err = AppError::AccountValidation("test".to_string());
+    assert_eq!(err.exit_code(), 10);
+}
+
+#[test]
+fn account_error_code_is_stable() {
+    let err = AppError::AccountValidation("test".to_string());
+    assert_eq!(err.code(), "account.validation_failed");
+}
+
+#[test]
+fn account_error_category_is_account() {
+    let err = AppError::AccountValidation("test".to_string());
+    assert_eq!(err.category(), "account");
+}
+
+#[test]
+fn account_error_hint_is_present() {
+    let err = AppError::AccountValidation("test".to_string());
+    assert!(err.hint().is_some());
+}
+
+fn make_hash(account_number: &str, hash_value: &str) -> schwab::AccountNumberHash {
+    schwab::AccountNumberHash {
+        account_number: Some(account_number.to_string()),
+        hash_value: Some(hash_value.to_string()),
+    }
+}
+
+fn make_pref(
+    account_number: &str,
+    nick_name: Option<&str>,
+    display_acct_id: Option<&str>,
+    primary: bool,
+    acct_type: &str,
+) -> schwab::UserPreferenceAccount {
+    schwab::UserPreferenceAccount {
+        account_color: None,
+        account_number: Some(account_number.to_string()),
+        auto_position_effect: None,
+        display_acct_id: display_acct_id.map(str::to_string),
+        nick_name: nick_name.map(str::to_string),
+        primary_account: Some(primary),
+        r#type: Some(acct_type.to_string()),
+    }
+}
+
+#[test]
+fn build_account_row_with_preference() {
+    let pref = make_pref("A1", Some("Trading"), Some("***1234"), true, "MARGIN");
+    let row = build_account_row("HASH1".to_string(), Some(&pref));
+
+    assert_eq!(row.account_hash, "HASH1");
+    assert_eq!(row.nickname.as_deref(), Some("Trading"));
+    assert_eq!(row.display_account_id.as_deref(), Some("***1234"));
+    assert_eq!(row.primary_account, Some(true));
+    assert_eq!(row.account_type.as_deref(), Some("MARGIN"));
+
+    let serialized = serde_json::to_string(&row).unwrap();
+    assert!(!serialized.contains("account_number"));
+}
+
+#[test]
+fn build_account_row_without_preference() {
+    let row = build_account_row("HASH2".to_string(), None);
+
+    assert_eq!(row.account_hash, "HASH2");
+    assert!(row.nickname.is_none());
+    assert!(row.display_account_id.is_none());
+    assert!(row.primary_account.is_none());
+    assert!(row.account_type.is_none());
+
+    let serialized = serde_json::to_value(&row).unwrap();
+    let object = serialized.as_object().unwrap();
+    assert_eq!(object.len(), 1);
+    assert_eq!(object["account_hash"], "HASH2");
+}
+
+#[test]
+fn build_account_row_empty_nickname() {
+    let pref = make_pref("A1", Some(""), Some("***1234"), false, "CASH");
+    let row = build_account_row("HASH3".to_string(), Some(&pref));
+
+    assert_eq!(row.nickname.as_deref(), Some(""));
+}
+
+#[test]
+fn build_account_row_missing_nick_name() {
+    let pref = make_pref("A1", None, Some("***1234"), false, "CASH");
+    let row = build_account_row("HASH4".to_string(), Some(&pref));
+
+    assert!(row.nickname.is_none());
+}
+
+#[test]
+fn join_hash_to_preference_matches_on_account_number() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Nick1"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Nick2"), Some("***2222"), false, "CASH"),
+    ];
+
+    let rows: Vec<_> = hashes
+        .iter()
+        .filter_map(|hash| {
+            hash.hash_value.as_ref().map(|hash_value| {
+                build_account_row(
+                    hash_value.clone(),
+                    prefs.iter().find(|pref| {
+                        pref.account_number.as_deref() == hash.account_number.as_deref()
+                    }),
+                )
+            })
+        })
+        .collect();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].account_hash, "HASH1");
+    assert_eq!(rows[0].nickname.as_deref(), Some("Nick1"));
+    assert_eq!(rows[1].account_hash, "HASH2");
+    assert_eq!(rows[1].nickname.as_deref(), Some("Nick2"));
+}
+
+#[test]
+fn join_asymmetric_hash_without_pref() {
+    let hash = make_hash("A3", "HASH3");
+    let row = build_account_row(hash.hash_value.clone().unwrap(), None);
+
+    assert_eq!(row.account_hash, "HASH3");
+    assert!(row.nickname.is_none());
+}
+
+#[test]
+fn join_asymmetric_pref_without_hash() {
+    let hash = schwab::AccountNumberHash {
+        account_number: Some("A4".to_string()),
+        hash_value: None,
+    };
+    let pref = make_pref("A4", Some("Nick4"), Some("***4444"), true, "MARGIN");
+
+    // No hash value means this account cannot produce a row, so skip it.
+    let rows: Vec<_> = [hash]
+        .into_iter()
+        .filter_map(|hash| {
+            hash.hash_value
+                .as_ref()
+                .map(|hash_value| build_account_row(hash_value.clone(), Some(&pref)))
+        })
+        .collect();
+
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn serialized_row_never_contains_account_number() {
+    let rows = vec![
+        build_account_row(
+            "HASH1".to_string(),
+            Some(&make_pref(
+                "A1",
+                Some("Nick1"),
+                Some("***1111"),
+                true,
+                "MARGIN",
+            )),
+        ),
+        build_account_row("HASH2".to_string(), None),
+    ];
+
+    let serialized = serde_json::to_string(&rows).unwrap();
+    assert!(!serialized.contains("account_number"));
+}
+
+#[test]
+fn account_resolve_hash_match_wins_first() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "Trading")];
+    let prefs = [
+        make_pref("A1", Some("Trading"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Other"), Some("***2222"), false, "CASH"),
+    ];
+
+    let resolved = resolve_account_from_data(&hashes, &prefs, "Trading").unwrap();
+
+    assert_eq!(resolved.account_hash, "Trading");
+    assert_eq!(resolved.matched_by, "hash");
+    assert_eq!(resolved.nickname.as_deref(), Some("Other"));
+    assert_eq!(resolved.display_account_id.as_deref(), Some("***2222"));
+    assert_eq!(resolved.primary_account, Some(false));
+    assert_eq!(resolved.account_type.as_deref(), Some("CASH"));
+}
+
+#[test]
+fn account_resolve_nickname_match_returns_canonical_hash() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Primary"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Cash"), Some("***2222"), false, "CASH"),
+    ];
+
+    let resolved = resolve_account_from_data(&hashes, &prefs, "Cash").unwrap();
+
+    assert_eq!(resolved.account_hash, "HASH2");
+    assert_eq!(resolved.matched_by, "nickname");
+    assert_eq!(resolved.nickname.as_deref(), Some("Cash"));
+    assert_eq!(resolved.display_account_id.as_deref(), Some("***2222"));
+    assert_eq!(resolved.primary_account, Some(false));
+    assert_eq!(resolved.account_type.as_deref(), Some("CASH"));
+}
+
+#[test]
+fn account_resolve_no_match_returns_validation_error() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Primary"),
+        Some("***1111"),
+        true,
+        "MARGIN",
+    )];
+
+    let err = resolve_account_from_data(&hashes, &prefs, "Missing").unwrap_err();
+
+    assert!(matches!(err, AppError::AccountValidation(_)));
+    assert_eq!(err.to_string(), "no account found matching 'Missing'");
+}
+
+#[test]
+fn account_resolve_ambiguous_nickname_returns_compact_validation_error() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Trading"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Trading"), Some("***2222"), false, "CASH"),
+    ];
+
+    let err = resolve_account_from_data(&hashes, &prefs, "Trading").unwrap_err();
+    let message = err.to_string();
+
+    assert!(matches!(err, AppError::AccountValidation(_)));
+    assert!(message.contains("ambiguous account nickname 'Trading'"));
+    assert!(message.contains("Trading (***1111)"));
+    assert!(message.contains("Trading (***2222)"));
+    assert!(!message.contains("A1"));
+    assert!(!message.contains("A2"));
+}
+
+// ---------------------------------------------------------------------------
+// Fixture helpers for render_summary_from_data tests
+// ---------------------------------------------------------------------------
+
+fn make_margin_account(
+    account_number: &str,
+    balances: Option<schwab::MarginBalance>,
+    positions: Option<Vec<schwab::Position>>,
+) -> schwab::Account {
+    schwab::Account {
+        securities_account: Some(schwab::SecuritiesAccount::Margin(schwab::MarginAccount {
+            account_number: Some(account_number.to_string()),
+            is_closing_only_restricted: None,
+            is_day_trader: None,
+            pfcb_flag: None,
+            positions,
+            round_trips: None,
+            r#type: None,
+            current_balances: balances,
+            initial_balances: None,
+            projected_balances: None,
+        })),
+    }
+}
+
+fn make_cash_account(
+    account_number: &str,
+    balances: Option<schwab::CashBalance>,
+    positions: Option<Vec<schwab::Position>>,
+) -> schwab::Account {
+    schwab::Account {
+        securities_account: Some(schwab::SecuritiesAccount::Cash(schwab::CashAccount {
+            account_number: Some(account_number.to_string()),
+            is_closing_only_restricted: None,
+            is_day_trader: None,
+            pfcb_flag: None,
+            positions,
+            round_trips: None,
+            r#type: None,
+            current_balances: balances,
+            initial_balances: None,
+            projected_balances: None,
+        })),
+    }
+}
+
+fn make_margin_balance() -> schwab::MarginBalance {
+    schwab::MarginBalance {
+        available_funds: Some(number(10_000.0)),
+        available_funds_non_marginable_trade: Some(number(8_000.0)),
+        buying_power: Some(number(20_000.0)),
+        buying_power_non_marginable_trade: None,
+        day_trading_buying_power: None,
+        day_trading_buying_power_call: None,
+        equity: Some(number(50_000.0)),
+        equity_percentage: None,
+        is_in_call: None,
+        long_margin_value: None,
+        maintenance_call: None,
+        maintenance_requirement: None,
+        margin_balance: None,
+        option_buying_power: Some(number(15_000.0)),
+        reg_t_call: None,
+        short_balance: None,
+        short_margin_value: None,
+        sma: None,
+        stock_buying_power: Some(number(18_000.0)),
+    }
+}
+
+fn make_cash_balance() -> schwab::CashBalance {
+    schwab::CashBalance {
+        cash_available_for_trading: Some(number(5_000.0)),
+        cash_available_for_withdrawal: Some(number(4_500.0)),
+        cash_call: None,
+        cash_debit_call_value: None,
+        long_non_marginable_market_value: None,
+        total_cash: Some(number(5_500.0)),
+        unsettled_cash: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// render_summary_from_data tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn account_summary_without_positions() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Margin Acct"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Cash Acct"), Some("***2222"), false, "CASH"),
+    ];
+    let accounts = vec![
+        make_margin_account("A1", Some(make_margin_balance()), None),
+        make_cash_account("A2", Some(make_cash_balance()), None),
+    ];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 2);
+
+    // Margin account row
+    let margin_row = &summary.accounts[0];
+    assert_eq!(margin_row.account_hash, "HASH1");
+    assert_eq!(margin_row.nickname.as_deref(), Some("Margin Acct"));
+    assert!(margin_row.positions.is_none());
+    assert!(margin_row.balances.is_some());
+
+    let serialized = serde_json::to_value(margin_row).unwrap();
+    assert_eq!(serialized["balances"]["kind"], "margin");
+    assert!(serialized.get("positions").is_none());
+
+    // Cash account row
+    let cash_row = &summary.accounts[1];
+    assert_eq!(cash_row.account_hash, "HASH2");
+    assert_eq!(cash_row.nickname.as_deref(), Some("Cash Acct"));
+    assert!(cash_row.positions.is_none());
+
+    let serialized = serde_json::to_value(cash_row).unwrap();
+    assert_eq!(serialized["balances"]["kind"], "cash");
+    assert!(serialized.get("positions").is_none());
+
+    // Raw account numbers must not appear in serialized output
+    let full_json = serde_json::to_string(&summary).unwrap();
+    assert!(!full_json.contains("account_number"));
+    assert!(!full_json.contains("\"A1\""));
+    assert!(!full_json.contains("\"A2\""));
+}
+
+#[test]
+fn account_summary_with_positions() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Trading"),
+        Some("***1111"),
+        true,
+        "MARGIN",
+    )];
+    let positions = vec![schwab::Position {
+        aged_quantity: None,
+        average_long_price: None,
+        average_price: Some(number(150.0)),
+        average_short_price: None,
+        current_day_cost: None,
+        current_day_profit_loss: None,
+        current_day_profit_loss_percentage: None,
+        instrument: Some(AccountsInstrument::Equity(AccountEquity {
+            asset_type: Some(InstrumentAssetType::Equity),
+            cusip: Some("037833100".to_string()),
+            description: Some("Apple Inc".to_string()),
+            instrument_id: Some(12345),
+            net_change: None,
+            symbol: Some("AAPL".to_string()),
+        })),
+        long_open_profit_loss: None,
+        long_quantity: Some(number(10.0)),
+        maintenance_requirement: None,
+        market_value: Some(number(1_500.0)),
+        previous_session_long_quantity: None,
+        previous_session_short_quantity: None,
+        settled_long_quantity: None,
+        settled_short_quantity: None,
+        short_open_profit_loss: None,
+        short_quantity: None,
+        tax_lot_average_long_price: None,
+        tax_lot_average_short_price: None,
+    }];
+    let accounts = vec![make_margin_account(
+        "A1",
+        Some(make_margin_balance()),
+        Some(positions),
+    )];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true);
+
+    assert_eq!(summary.accounts.len(), 1);
+    let row = &summary.accounts[0];
+    assert!(row.positions.is_some());
+    let pos = row.positions.as_ref().unwrap();
+    assert_eq!(pos.len(), 1);
+    assert_eq!(pos[0]["symbol"], "AAPL");
+    assert_eq!(pos[0]["description"], "Apple Inc");
+    assert_eq!(pos[0]["asset_type"], "Equity");
+}
+
+#[test]
+fn account_summary_positions_none_when_not_requested() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Trading"),
+        Some("***1111"),
+        true,
+        "MARGIN",
+    )];
+    // Even if positions data exists on the account, with_positions=false should omit them.
+    let positions = vec![schwab::Position {
+        aged_quantity: None,
+        average_long_price: None,
+        average_price: None,
+        average_short_price: None,
+        current_day_cost: None,
+        current_day_profit_loss: None,
+        current_day_profit_loss_percentage: None,
+        instrument: None,
+        long_open_profit_loss: None,
+        long_quantity: None,
+        maintenance_requirement: None,
+        market_value: None,
+        previous_session_long_quantity: None,
+        previous_session_short_quantity: None,
+        settled_long_quantity: None,
+        settled_short_quantity: None,
+        short_open_profit_loss: None,
+        short_quantity: None,
+        tax_lot_average_long_price: None,
+        tax_lot_average_short_price: None,
+    }];
+    let accounts = vec![make_margin_account(
+        "A1",
+        Some(make_margin_balance()),
+        Some(positions),
+    )];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    assert!(summary.accounts[0].positions.is_none());
+}
+
+#[test]
+fn account_summary_missing_nickname() {
+    let hashes = [make_hash("A1", "HASH1")];
+    // No preference data at all for this account.
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_cash_account("A1", Some(make_cash_balance()), None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    let row = &summary.accounts[0];
+    assert_eq!(row.account_hash, "HASH1");
+    assert!(row.nickname.is_none());
+    assert!(row.display_account_id.is_none());
+    assert!(row.primary_account.is_none());
+    assert!(row.account_type.is_none());
+
+    // Balances should still be present.
+    assert!(row.balances.is_some());
+    let serialized = serde_json::to_value(row).unwrap();
+    assert_eq!(serialized["balances"]["kind"], "cash");
+}
+
+#[test]
+fn account_summary_skips_accounts_without_securities_account() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Trading"),
+        Some("***1111"),
+        true,
+        "MARGIN",
+    )];
+    let accounts = vec![schwab::Account {
+        securities_account: None,
+    }];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert!(summary.accounts.is_empty());
+}
+
+#[test]
+fn account_summary_skips_accounts_without_matching_hash() {
+    let hashes = [make_hash("OTHER", "HASH_OTHER")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    // A1 has no matching hash, so it should be excluded.
+    assert!(summary.accounts.is_empty());
+}
+
+#[test]
+fn account_summary_margin_balance_fields() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let row = &summary.accounts[0];
+
+    match row.balances.as_ref().unwrap() {
+        AccountBalances::Margin(m) => {
+            assert_eq!(m.cash_available_for_trading, Some(number(10_000.0)));
+            assert_eq!(m.cash_available_for_withdrawal, Some(number(8_000.0)));
+            assert_eq!(m.buying_power, Some(number(20_000.0)));
+            assert_eq!(m.stock_buying_power, Some(number(18_000.0)));
+            assert_eq!(m.option_buying_power, Some(number(15_000.0)));
+            assert_eq!(m.equity, Some(number(50_000.0)));
+        }
+        AccountBalances::Cash(_) => panic!("expected margin balances"),
+    }
+}
+
+#[test]
+fn account_summary_cash_balance_fields() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_cash_account("A1", Some(make_cash_balance()), None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let row = &summary.accounts[0];
+
+    match row.balances.as_ref().unwrap() {
+        AccountBalances::Cash(c) => {
+            assert_eq!(c.cash_available_for_trading, Some(number(5_000.0)));
+            assert_eq!(c.cash_available_for_withdrawal, Some(number(4_500.0)));
+            assert_eq!(c.total_cash, Some(number(5_500.0)));
+        }
+        AccountBalances::Margin(_) => panic!("expected cash balances"),
+    }
+}
+
+#[test]
+fn account_summary_no_balances_when_absent() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_margin_account("A1", None, None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    assert!(summary.accounts[0].balances.is_none());
+}

@@ -84,12 +84,24 @@ schwab-agent market quote AAPL MSFT
 schwab-agent market history SPY --period 10 --period-type day
 ```
 
+### account
+
+Compact account discovery for LLM agents: `summary`, `resolve`.
+
+Use `account summary` to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands.
+
+```bash
+schwab-agent account summary              # list all accounts with balances
+schwab-agent account summary --positions  # include holdings
+schwab-agent account resolve Trading      # resolve nickname to canonical hash
+```
+
 ### portfolio
 
 Account snapshot with optional positions.
 
 ```bash
-schwab-agent portfolio snapshot --account HASH --positions
+schwab-agent portfolio snapshot --positions
 ```
 
 ### stock
@@ -103,7 +115,7 @@ Each action hardcodes the Schwab `Instruction` to prevent accidental trade rever
 ```bash
 schwab-agent stock build buy AAPL --quantity 10 --price 150.00
 schwab-agent stock preview buy AAPL --quantity 10 --price 150.00 --account HASH --save-preview
-schwab-agent stock place-from-preview --preview-file /path/to/preview.json
+schwab-agent stock place-from-preview --account HASH_OR_NICKNAME --digest DIGEST_HEX
 ```
 
 ### order
