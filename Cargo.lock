@@ -1824,9 +1824,9 @@ dependencies = [
 
 [[package]]
 name = "schwab"
-version = "0.1.4"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c42d8799d2a2afba6932a15cc45040ac78738ed9075e3db98293a282490257e"
+checksum = "6cdef348d34cac8be12d8d812aae1aab5b8c4ed94547cf1a34a71e1bac862bdb"
 dependencies = [
  "base64",
  "rand 0.10.1",
@@ -3051,7 +3051,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[patch.unused]]
-name = "schwab"
-version = "0.1.6"

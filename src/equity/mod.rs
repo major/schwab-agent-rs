@@ -249,10 +249,12 @@ pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<Command
             Ok(Envelope::success(&name, data, Metadata::now()))
         }
         EquityCommand::Place(args) => {
+            crate::config::require_mutable_enabled()?;
             let name = format!("stock.place.{}", action_name(&args.action));
             do_place(cli, &args.account, &args.action, &name).await
         }
         EquityCommand::PlaceFromPreview(args) => {
+            crate::config::require_mutable_enabled()?;
             do_place_from_preview(cli, &args.account, &args.digest).await
         }
         EquityCommand::PreviewRaw(args) => {
@@ -263,7 +265,10 @@ pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<Command
                 Metadata::now(),
             ))
         }
-        EquityCommand::PlaceRaw(args) => do_place_raw(cli, &args.account, &args.json).await,
+        EquityCommand::PlaceRaw(args) => {
+            crate::config::require_mutable_enabled()?;
+            do_place_raw(cli, &args.account, &args.json).await
+        }
     }
 }
 

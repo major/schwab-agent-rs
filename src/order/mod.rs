@@ -715,13 +715,16 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<CommandO
             Ok(Envelope::success(&name, data, Metadata::now()))
         }
         OrderCommand::Place(args) => {
+            crate::config::require_mutable_enabled()?;
             let name = format!("order.place.{}", strategy_name(&args.strategy));
             do_place(cli, &args.account, &args.strategy, &name).await
         }
         OrderCommand::PlaceFromPreview(args) => {
+            crate::config::require_mutable_enabled()?;
             do_place_from_preview(cli, &args.account, &args.digest).await
         }
         OrderCommand::Replace(args) => {
+            crate::config::require_mutable_enabled()?;
             do_replace(cli, &args.account, args.order_id, &args.strategy).await
         }
         OrderCommand::List(args) => lifecycle::handle_list(cli, args).await,
