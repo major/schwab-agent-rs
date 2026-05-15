@@ -33,7 +33,7 @@ use crate::account;
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
-use crate::output::{CommandOutput, Envelope, Metadata};
+
 use crate::shared::{DurationChoice, SessionChoice};
 use crate::verify;
 
@@ -701,18 +701,12 @@ pub struct OrderReplaceArgs {
 ///
 /// Order commands bypass the generic envelope wrapping in `execute()` because
 /// they compute their own dynamic command names (e.g., `order.build.long-call`).
-pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<CommandOutput, AppError> {
+pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<Value, AppError> {
     match command {
-        OrderCommand::Build(strategy) => {
-            let name = format!("order.build.{}", strategy_name(strategy));
-            let data = do_build(strategy)?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
-        }
+        OrderCommand::Build(strategy) => do_build(strategy),
         OrderCommand::Preview(args) => {
             let name = format!("order.preview.{}", strategy_name(&args.strategy));
-            let data =
-                do_preview(cli, &args.account, &args.strategy, args.save_preview, &name).await?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
+            do_preview(cli, &args.account, &args.strategy, args.save_preview, &name).await
         }
         OrderCommand::Place(args) => {
             crate::config::require_mutable_enabled()?;
@@ -1008,8 +1002,8 @@ async fn do_place(
     cli: &Cli,
     account: &str,
     strategy: &StrategyCommand,
-    command_name: &str,
-) -> Result<CommandOutput, AppError> {
+    _command_name: &str,
+) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
@@ -1027,16 +1021,12 @@ async fn do_place(
     )
     .await;
 
-    verify::action_envelope(command_name, result)
+    verify::action_value(result)
 }
 
 /// Places an order from a previously saved preview digest with post-place
 /// verification.
-async fn do_place_from_preview(
-    cli: &Cli,
-    account: &str,
-    digest: &str,
-) -> Result<CommandOutput, AppError> {
+async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
     let account_hash = resolved.account_hash;
@@ -1056,7 +1046,7 @@ async fn do_place_from_preview(
     result.digest = Some(digest.to_string());
     result.original_command = Some(saved.command);
 
-    verify::action_envelope("order.place-from-preview", result)
+    verify::action_value(result)
 }
 
 /// Replaces an existing order with a strategy payload and verifies the result.
@@ -1065,7 +1055,7 @@ async fn do_replace(
     account: &str,
     order_id: i64,
     strategy: &StrategyCommand,
-) -> Result<CommandOutput, AppError> {
+) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
     let client = auth::provider(cli)?.client().await?;
     let resolved = account::resolve_account(&client, account).await?;
@@ -1088,7 +1078,7 @@ async fn do_replace(
     )
     .await;
 
-    verify::action_envelope("order.replace", result)
+    verify::action_value(result)
 }
 
 // ---------------------------------------------------------------------------

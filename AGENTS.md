@@ -15,9 +15,9 @@ Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-or
 ```text
 src/
   main.rs          - Entry point, delegates to lib.rs::run_from_env()
-  lib.rs           - Orchestrator: CLI parsing, command dispatch, JSON envelope output
+  lib.rs           - Orchestrator: CLI parsing, command dispatch, JSON output
   cli.rs           - clap derive CLI definition with subcommands and global args
-  output.rs        - Envelope<T> (versioned JSON wrapper: ok, command, data/error, warnings, meta)
+  output.rs        - ErrorBody struct for structured error JSON output
   shared.rs        - Shared types: SessionChoice, DurationChoice, to_number() helper
   config.rs        - Agent config: load shared config, mutable-operation guard
   error/
@@ -32,7 +32,7 @@ src/
   market/
     mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote()
     tests.rs       - Market module tests
-  verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_envelope()
+  verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_value()
   order/
     mod.rs         - Option order dispatch, 15 named option strategies, inline tests
     builder.rs     - OCC symbol construction (21-char format), inline tests
@@ -118,7 +118,7 @@ The verification module (`src/verify.rs`) provides:
 
 - `OrderActionResult` struct with the existing `order_id`, `location`, and submitted `order` fields, plus `verification_state` ("verified" or "unverified"), optional `verification_failures`, and the follow-up GET payload in `verified_order`
 - `verify_order()` does a best-effort GET after any mutable action; on failure it returns `unverified` with failure details instead of propagating the error
-- `action_envelope()` builds the Envelope with warnings extracted from unverified failures
+- `action_value()` serializes the `OrderActionResult` directly to `Value` (verification failures are already in the struct)
 
 ### Order Lifecycle Commands
 
@@ -145,20 +145,7 @@ Token path env var: `SCHWAB_TOKEN_PATH`. Default: `$XDG_CONFIG_DIR/schwab-agent-
 
 ## Output Format
 
-All output uses `Envelope<T>` - a versioned JSON wrapper:
-
-```json
-{
-  "ok": true,
-  "command": "market.quote",
-  "schema_version": 1,
-  "data": { ... },
-  "warnings": [],
-  "meta": { ... }
-}
-```
-
-Errors use the same envelope with `ErrorBody` in the `error` field. Schema version constant: `SCHEMA_VERSION = 1`.
+Commands output raw JSON data payloads directly (no wrapper). Errors output an `ErrorBody` JSON object with `code`, `message`, `category`, `retryable`, and `hint` fields.
 
 ### Error Codes and Exit Codes
 
@@ -212,13 +199,11 @@ Always run both default and `decimal` feature configurations. CI does the same.
 ### Patterns to Follow
 
 - New commands go in their command group module and get wired through `cli.rs` and `lib.rs`
-- All command output wraps in `Envelope<T>` - never print raw data to stdout
+- All command output is raw JSON data payloads; errors use `ErrorBody` struct
 - Errors use `AppError` variants with stable error codes, exit codes, categories, and hints
 - Order strategies hardcode contract type + direction (safety invariant)
 - Stock actions hardcode instruction (safety invariant)
-- Order commands produce dynamic command names (e.g., `order.build.long-call`, `stock.build.buy`)
 - Mutable order actions (place, replace, cancel) use `verify::verify_order()` for post-action verification
-- Lifecycle commands (order list/get/replace/cancel) use static command names (e.g., `order.list`, `order.get`, `order.replace`, `order.cancel`)
 
 ### Testing
 

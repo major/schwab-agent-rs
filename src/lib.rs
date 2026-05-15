@@ -19,10 +19,11 @@ mod verify;
 use std::io::{self, Write};
 
 use clap::Parser;
+use serde_json::Value;
 
 use crate::cli::{Cli, Command, OptionCommand, TaCommand};
 use crate::error::AppError;
-use crate::output::{CommandOutput, Envelope, ErrorBody, Metadata};
+use crate::output::ErrorBody;
 
 /// Parses process arguments, runs the selected command, and writes JSON output.
 pub async fn run_from_env() -> i32 {
@@ -34,19 +35,19 @@ pub async fn run(cli: Cli) -> i32 {
     let result = execute(cli).await;
     let mut stdout = io::stdout().lock();
     match result {
-        Ok(output) => write_json(&mut stdout, &output).unwrap_or(1),
+        Ok(data) => write_json(&mut stdout, &data).unwrap_or(1),
         Err(error) => {
             let code = error.exit_code();
-            let output = Envelope::error(ErrorBody::from(&error));
-            let write_code = write_json(&mut stdout, &output).unwrap_or(1);
+            let body = ErrorBody::from(&error);
+            let write_code = write_json(&mut stdout, &body).unwrap_or(1);
             if write_code == 0 { code } else { write_code }
         }
     }
 }
 
-/// Executes a command and returns the JSON envelope value for tests and callers.
-pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
-    // Order and stock commands produce their own envelopes with dynamic command names.
+/// Executes a command and returns the data payload directly.
+pub async fn execute(cli: Cli) -> Result<Value, AppError> {
+    // Order and stock commands produce their own data values with dynamic command names.
     if let Command::Order(command) = &cli.command {
         return order::handle(&cli, command).await;
     }
@@ -55,50 +56,38 @@ pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
     }
     if let Command::Analyze(args) = &cli.command {
         let client = auth::provider(&cli)?.client().await?;
-        let envelope = analyze::analyze(&client, args).await?;
-        let data = envelope.data.map(serde_json::to_value).transpose()?;
-        return Ok(CommandOutput {
-            version: envelope.version,
-            ok: envelope.ok,
-            command: envelope.command,
-            data,
-            error: envelope.error,
-            warnings: envelope.warnings,
-            meta: envelope.meta,
-        });
+        return analyze::analyze(&client, args).await;
     }
 
-    let command = cli.command_name();
-    let data = match &cli.command {
-        Command::Auth(command) => auth::handle(&cli, command).await?,
-        Command::Market(command) => market::handle(&cli, command).await?,
+    match &cli.command {
+        Command::Auth(command) => auth::handle(&cli, command).await,
+        Command::Market(command) => market::handle(&cli, command).await,
         Command::Option(command) => {
             let client = auth::provider(&cli)?.client().await?;
             match command {
                 OptionCommand::Expirations(args) => {
-                    options::expirations::handle(&client, &args.symbol).await?
+                    options::expirations::handle(&client, &args.symbol).await
                 }
-                OptionCommand::Chain(args) => options::chain::handle(&client, args).await?,
-                OptionCommand::Screen(args) => options::screen::handle(&client, args).await?,
-                OptionCommand::Contract(args) => options::contract::handle(&client, args).await?,
+                OptionCommand::Chain(args) => options::chain::handle(&client, args).await,
+                OptionCommand::Screen(args) => options::screen::handle(&client, args).await,
+                OptionCommand::Contract(args) => options::contract::handle(&client, args).await,
             }
         }
         Command::Analyze(_) => unreachable!("handled above"),
         Command::Ta(ta_cmd) => {
             let client = auth::provider(&cli)?.client().await?;
             match ta_cmd {
-                TaCommand::Dashboard(args) => ta::dashboard(&client, args).await?,
+                TaCommand::Dashboard(args) => ta::dashboard(&client, args).await,
                 TaCommand::ExpectedMove(args) => {
-                    ta::expected_move::expected_move(&client, args).await?
+                    ta::expected_move::expected_move(&client, args).await
                 }
             }
         }
         Command::Order(_) => unreachable!("handled above"),
-        Command::Portfolio(command) => portfolio::handle(&cli, command).await?,
+        Command::Portfolio(command) => portfolio::handle(&cli, command).await,
         Command::Stock(_) => unreachable!("handled above"),
-        Command::Account(command) => account::handle(&cli, command).await?,
-    };
-    Ok(Envelope::success(command, data, Metadata::now()))
+        Command::Account(command) => account::handle(&cli, command).await,
+    }
 }
 
 /// Serializes `value` as JSON and writes it to `writer` followed by a newline.

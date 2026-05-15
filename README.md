@@ -16,20 +16,7 @@ Agent-oriented JSON CLI porcelain for the Charles Schwab API, built on top of [s
 
 `schwab-agent` is a CLI binary that wraps the `schwab` crate and emits structured JSON for every command. It is designed for LLM agents and automation pipelines that need predictable, machine-readable output from the Schwab brokerage API.
 
-All output uses a versioned `Envelope<T>` JSON wrapper:
-
-```json
-{
-  "ok": true,
-  "command": "market.quote",
-  "version": 1,
-  "data": { "..." : "..." },
-  "warnings": [],
-  "meta": { "..." : "..." }
-}
-```
-
-Errors use the same envelope shape with an `error` field instead of `data`.
+Commands output raw JSON data payloads directly for minimal token overhead. Errors output a structured JSON object with `code`, `message`, `category`, `retryable`, and `hint` fields.
 
 ## Prerequisites
 
@@ -178,7 +165,7 @@ schwab-agent analyze AAPL MSFT GOOG SPY      # multiple symbols
 schwab-agent analyze AAPL --interval weekly --points 10
 ```
 
-Returns quote + TA dashboard for each symbol. If some symbols fail, the envelope still returns `ok: true` with partial data and warnings for failed symbols. All symbols failing produces `ok: false`.
+Returns quote + TA dashboard for each symbol. Partial failures include per-symbol error fields (`quote_error`, `analysis_error`) alongside successful results.
 
 ## Order Workflow
 

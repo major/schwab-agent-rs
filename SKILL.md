@@ -1,6 +1,6 @@
 # schwab-agent CLI
 
-Structured JSON CLI for Charles Schwab API. All output is JSON envelopes. Set env vars once, then most commands need zero flags.
+Structured JSON CLI for Charles Schwab API. All output is raw JSON data payloads. Set env vars once, then most commands need zero flags.
 
 > **Disclaimer:** This project is unofficial and is not affiliated with, endorsed by, or connected to Charles Schwab, TD Ameritrade, or thinkorswim in any way.
 
@@ -266,7 +266,7 @@ List flags: `--account` (optional), `--status`, `--from`/`--to` (`YYYY-MM-DD` or
 
 All mutable actions (place, place-from-preview, place-raw, replace, cancel) auto-verify by GETting the order after the action. Schwab only returns a Location header on placement and replacement, so this GET is what gives the LLM actual order state.
 
-Response `data` fields: `action` ("place"/"replace"/"cancel"), `order_id`, `location`, `order` (submitted payload), `verification_state` ("verified"/"unverified"), and `verified_order` (full order from GET when available). Optional: `verification_failures` (when unverified), `digest`/`original_command` (for place-from-preview). Unverified failures appear in the envelope `warnings` array; the order may still have succeeded. Cancel verification is only `verified` when the fetched order status is `CANCELED`.
+Response fields: `action` ("place"/"replace"/"cancel"), `order_id`, `location`, `order` (submitted payload), `verification_state` ("verified"/"unverified"), and `verified_order` (full order from GET when available). Optional: `verification_failures` (when unverified), `digest`/`original_command` (for place-from-preview). Unverified failures are included in the response; the order may still have succeeded. Cancel verification is only `verified` when the fetched order status is `CANCELED`.
 
 ## Option Orders
 
@@ -468,7 +468,7 @@ Expected-move flags:
 
 ## Analyze
 
-Multi-symbol analysis combining quote and TA dashboard per symbol. Partial-failure: if some symbols fail, the envelope returns `ok: true` with partial data and warnings for the failed symbols. All symbols failing returns `ok: false`.
+Multi-symbol analysis combining quote and TA dashboard per symbol. Partial failures include per-symbol error fields (`quote_error`, `analysis_error`) alongside successful results.
 
 ```bash
 schwab-agent analyze AAPL                    # single symbol
@@ -485,25 +485,19 @@ Analyze flags:
 
 ## Output Format
 
-Every response is a JSON envelope:
+Commands output raw JSON data payloads directly (no wrapper envelope). Errors output a structured JSON object:
 
 ```json
-{"ok": true, "command": "market.quote", "version": 1, "data": {...}, "warnings": [], "meta": {"generated_at": "..."}}
+{"code": "auth.token_missing", "message": "...", "category": "auth", "retryable": false, "hint": "..."}
 ```
 
-Errors:
-
-```json
-{"ok": false, "command": "auth.status", "version": 1, "error": {"code": "auth.token_missing", "message": "...", "category": "auth", "retryable": false, "hint": "..."}}
-```
-
-Check `ok` first. On error, read `error.hint` for recovery steps. Check `error.retryable` before retrying.
+On error (non-zero exit code), read `hint` for recovery steps. Check `retryable` before retrying.
 
 ### Error Codes
 
 | Code | Meaning | Recovery |
 |---|---|---|
-| `auth.config_missing` | No client ID/secret | Set `SCHWAB_CLIENT_ID` and `SCHWAB_CLIENT_SECRET` |
+| `auth.config_missing` | No client ID/secret | Add to `~/.config/schwab-agent/config.json` or set `SCHWAB_CLIENT_ID`/`SCHWAB_CLIENT_SECRET` |
 | `auth.token_missing` | No token file | Run `auth login-url` then `auth exchange` |
 | `auth.expired` | Token expired | Run `auth refresh` |
 | `auth.required` | Auth needed | Run full auth flow |

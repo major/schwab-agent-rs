@@ -13,7 +13,7 @@ use time::{Date, Month, OffsetDateTime, Time};
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
-use crate::output::{CommandOutput, Envelope, Metadata};
+
 use crate::verify;
 
 // ---------------------------------------------------------------------------
@@ -96,10 +96,7 @@ enum RangeBoundary {
 // ---------------------------------------------------------------------------
 
 /// Lists orders, optionally filtered by account, status, and time range.
-pub(crate) async fn handle_list(
-    cli: &Cli,
-    args: &OrderListArgs,
-) -> Result<CommandOutput, AppError> {
+pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
 
     let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
@@ -121,30 +118,21 @@ pub(crate) async fn handle_list(
     let count = orders.len();
     let data: Value = serde_json::to_value(&orders)?;
 
-    Ok(Envelope::success(
-        "order.list",
-        serde_json::json!({
-            "orders": data,
-            "count": count,
-        }),
-        Metadata::now(),
-    ))
+    Ok(serde_json::json!({
+        "orders": data,
+        "count": count,
+    }))
 }
 
 /// Retrieves a single order by account and order ID.
-pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<CommandOutput, AppError> {
+pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
     let order = client.get_order(&args.account, args.order_id).await?;
-    let data: Value = serde_json::to_value(&order)?;
-
-    Ok(Envelope::success("order.get", data, Metadata::now()))
+    Ok(serde_json::to_value(&order)?)
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
-pub(crate) async fn handle_cancel(
-    cli: &Cli,
-    args: &OrderCancelArgs,
-) -> Result<CommandOutput, AppError> {
+pub(crate) async fn handle_cancel(cli: &Cli, args: &OrderCancelArgs) -> Result<Value, AppError> {
     crate::config::require_mutable_enabled()?;
     let client = auth::provider(cli)?.client().await?;
     client.cancel_order(&args.account, args.order_id).await?;
@@ -159,7 +147,7 @@ pub(crate) async fn handle_cancel(
     )
     .await;
 
-    verify::action_envelope("order.cancel", result)
+    verify::action_value(result)
 }
 
 /// Normalizes list date arguments to RFC3339 instants.
