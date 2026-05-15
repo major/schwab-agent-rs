@@ -110,9 +110,11 @@ schwab-agent stock place-from-preview --preview-file /path/to/preview.json
 
 Option order workflow supporting 15 named strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`, `bull-call-spread`, `bear-call-spread`, `bull-put-spread`, `bear-put-spread`, `long-straddle`, `short-straddle`, `long-strangle`, `short-strangle`, `short-iron-condor`, `jade-lizard`.
 
-Subcommands: `build`, `preview`, `place`, `place-from-preview`.
+Subcommands: `build`, `preview`, `place`, `place-from-preview`, `list`, `get`, `cancel`.
 
 Each strategy hardcodes contract type and direction to prevent accidental trade reversal.
+
+Lifecycle commands (`list`, `get`, `cancel`) manage existing orders across accounts.
 
 ### option
 
@@ -135,6 +137,12 @@ The recommended agent workflow uses tamper-evident previews:
 Direct `place` is available for explicit human use, but agents should prefer the preview workflow.
 
 Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
+
+### Post-Place Verification
+
+All mutable order actions (place, place-from-preview, place-raw, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
+
+`order list --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`.
 
 ## Testing
 

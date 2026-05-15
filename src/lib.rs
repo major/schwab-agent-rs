@@ -10,6 +10,7 @@ mod order;
 mod output;
 mod portfolio;
 mod shared;
+mod verify;
 
 use std::io::{self, Write};
 

@@ -230,6 +230,24 @@ schwab-agent stock place-raw --account HASH --json '{
 - `orderType`: `"MARKET"`, `"LIMIT"`, `"STOP"`, `"STOP_LIMIT"`, `"TRAILING_STOP"`
 - Prices are strings in raw JSON (e.g., `"180.00"` not `180.00`)
 
+## Order Lifecycle
+
+```bash
+schwab-agent order list                                          # all accounts, last 60 days
+schwab-agent order list --account HASH --recent                  # single account, last 24h
+schwab-agent order list --account HASH --status WORKING --from 2025-01-01 --to 2025-01-31
+schwab-agent order get --account HASH 12345678                   # single order by ID
+schwab-agent order cancel --account HASH 12345678                # cancel + verify
+```
+
+List flags: `--account` (optional), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}`.
+
+## Post-Place Verification
+
+All mutable actions (place, place-from-preview, place-raw, cancel) auto-verify by GETting the order after the action. Schwab only returns a Location header on placement, so this GET is what gives the LLM actual order state.
+
+Response `data` fields: `action` ("place"/"cancel"), `order_id`, `location`, `order` (submitted payload), `verification_state` ("verified"/"unverified"), and `verified_order` (full order from GET when available). Optional: `verification_failures` (when unverified), `digest`/`original_command` (for place-from-preview). Unverified failures appear in the envelope `warnings` array; the order may still have succeeded. Cancel verification is only `verified` when the fetched order status is `CANCELED`.
+
 ## Option Orders
 
 Recommended LLM workflow: `preview --save-preview` (with account) -> `place-from-preview` (with digest). This places the exact saved preview payload after the digest, TTL, and account checks pass.

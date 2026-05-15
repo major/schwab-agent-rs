@@ -34,6 +34,7 @@ use crate::error::AppError;
 use crate::order::preview;
 use crate::output::{CommandOutput, Envelope, Metadata};
 use crate::shared::{DurationChoice, SessionChoice, to_number};
+use crate::verify;
 
 // ---------------------------------------------------------------------------
 // Equity action enum (hardcoded instructions)
@@ -248,16 +249,10 @@ pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<Command
         }
         EquityCommand::Place(args) => {
             let name = format!("stock.place.{}", action_name(&args.action));
-            let data = do_place(cli, &args.account, &args.action).await?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
+            do_place(cli, &args.account, &args.action, &name).await
         }
         EquityCommand::PlaceFromPreview(args) => {
-            let data = do_place_from_preview(cli, &args.account, &args.digest).await?;
-            Ok(Envelope::success(
-                "stock.place-from-preview",
-                data,
-                Metadata::now(),
-            ))
+            do_place_from_preview(cli, &args.account, &args.digest).await
         }
         EquityCommand::PreviewRaw(args) => {
             let data = do_preview_raw(cli, &args.account, &args.json, args.save_preview).await?;
@@ -267,10 +262,7 @@ pub(crate) async fn handle(cli: &Cli, command: &EquityCommand) -> Result<Command
                 Metadata::now(),
             ))
         }
-        EquityCommand::PlaceRaw(args) => {
-            let data = do_place_raw(cli, &args.account, &args.json).await?;
-            Ok(Envelope::success("stock.place-raw", data, Metadata::now()))
-        }
+        EquityCommand::PlaceRaw(args) => do_place_raw(cli, &args.account, &args.json).await,
     }
 }
 
@@ -398,33 +390,56 @@ async fn do_preview(
     Ok(data)
 }
 
-/// Places the order directly via the Schwab API.
-async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Value, AppError> {
+/// Places the order directly via the Schwab API with post-place verification.
+async fn do_place(
+    cli: &Cli,
+    account: &str,
+    action: &EquityAction,
+    command_name: &str,
+) -> Result<CommandOutput, AppError> {
     let order = build_equity_order(action)?;
     let client = auth::provider(cli)?.client().await?;
     let response = client.place_order(account, &order).await?;
     let order_json = serialize_order(&order)?;
 
-    Ok(serde_json::json!({
-        "order": order_json,
-        "order_id": response.order_id,
-        "location": response.location,
-    }))
+    let result = verify::verify_order(
+        &client,
+        account,
+        response.order_id,
+        "place",
+        response.location,
+        Some(order_json),
+    )
+    .await;
+
+    verify::action_envelope(command_name, result)
 }
 
-/// Places an order from a previously saved preview digest.
-async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
+/// Places an order from a previously saved preview digest with post-place
+/// verification.
+async fn do_place_from_preview(
+    cli: &Cli,
+    account: &str,
+    digest: &str,
+) -> Result<CommandOutput, AppError> {
     let saved = preview::load_preview(digest, account)?;
     let client = auth::provider(cli)?.client().await?;
     let response = client.place_order(account, &saved.order).await?;
 
-    Ok(serde_json::json!({
-        "order": saved.order,
-        "order_id": response.order_id,
-        "location": response.location,
-        "digest": digest,
-        "original_command": saved.command,
-    }))
+    let mut result = verify::verify_order(
+        &client,
+        account,
+        response.order_id,
+        "place",
+        response.location,
+        Some(saved.order),
+    )
+    .await;
+
+    result.digest = Some(digest.to_string());
+    result.original_command = Some(saved.command);
+
+    verify::action_envelope("stock.place-from-preview", result)
 }
 
 // ---------------------------------------------------------------------------
@@ -462,15 +477,22 @@ async fn do_preview_raw(
     Ok(data)
 }
 
-/// Places a raw JSON order payload via the Schwab API.
-async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<Value, AppError> {
+/// Places a raw JSON order payload via the Schwab API with post-place
+/// verification.
+async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<CommandOutput, AppError> {
     let order = parse_raw_json(json)?;
     let client = auth::provider(cli)?.client().await?;
     let response = client.place_order(account, &order).await?;
 
-    Ok(serde_json::json!({
-        "order": order,
-        "order_id": response.order_id,
-        "location": response.location,
-    }))
+    let result = verify::verify_order(
+        &client,
+        account,
+        response.order_id,
+        "place",
+        response.location,
+        Some(order),
+    )
+    .await;
+
+    verify::action_envelope("stock.place-raw", result)
 }
