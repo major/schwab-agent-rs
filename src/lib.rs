@@ -66,6 +66,8 @@ pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
                 OptionCommand::Contract(args) => options::contract::handle(&client, args).await?,
             }
         }
+        Command::Analyze(_) => todo!("wired in Task 11"),
+        Command::Ta(_) => todo!("wired in Task 11"),
         Command::Order(_) => unreachable!("handled above"),
         Command::Portfolio(command) => portfolio::handle(&cli, command).await?,
         Command::Stock(_) => unreachable!("handled above"),
