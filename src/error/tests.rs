@@ -74,6 +74,18 @@ fn options_validation_classification() {
 }
 
 #[test]
+fn market_validation_classification() {
+    let err = AppError::MarketValidation {
+        message: "invalid quote field: foo".to_string(),
+    };
+    assert_eq!(err.exit_code(), 10);
+    assert_eq!(err.code(), "market.validation_failed");
+    assert_eq!(err.category(), "market");
+    assert!(!err.retryable());
+    assert!(err.hint().unwrap().contains("--fields"));
+}
+
+#[test]
 fn account_validation_classification() {
     let err = AppError::AccountValidation("test".to_string());
     assert_eq!(err.exit_code(), 10);

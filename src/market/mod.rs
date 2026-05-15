@@ -43,26 +43,340 @@ async fn history(cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
     Ok(to_value(candle_list)?)
 }
 
-/// Fetches quotes for the requested symbols from the Schwab API and returns a sorted,
-/// flattened JSON array of [`QuoteSummary`] values wrapped in a [`QuoteOutput`].
+/// Fetches quotes for the requested symbols from the Schwab API and returns either
+/// compact row output or the full flattened [`QuoteSummary`] object list.
 async fn quote(cli: &Cli, args: &QuoteArgs) -> Result<Value, AppError> {
+    let selected_fields = if args.all_fields {
+        None
+    } else {
+        Some(selected_quote_fields(args.fields.as_deref())?)
+    };
+
     let client = auth::provider(cli)?.client().await?;
-    let quotes = if let Some(fields) = &args.fields {
+    let quotes = if let Some(fields) = &args.api_fields {
         client
             .get_quotes_with_options(&args.symbols, QuoteOptions::new().fields(fields))
             .await?
     } else {
         client.get_quotes(&args.symbols).await?
     };
-    let mut summaries = quotes
+    let summaries = quotes
         .into_iter()
         .map(|(requested_symbol, quote)| summarize_quote(requested_symbol, quote))
         .collect::<Vec<_>>();
+    if args.all_fields {
+        return Ok(to_value(QuoteOutput {
+            symbols: args.symbols.clone(),
+            quotes: sort_quote_summaries(summaries),
+        })?);
+    }
+
+    let summaries = normalize_quote_summaries(summaries, &args.symbols);
+    let fields =
+        selected_fields.expect("compact quote fields are validated unless --all-fields is set");
+    Ok(to_value(select_quote_fields(&summaries, &fields))?)
+}
+
+/// Sorts quote summaries by requested symbol for stable detailed output.
+fn sort_quote_summaries(mut summaries: Vec<QuoteSummary>) -> Vec<QuoteSummary> {
     summaries.sort_by(|left, right| left.requested_symbol.cmp(&right.requested_symbol));
-    Ok(to_value(QuoteOutput {
-        symbols: args.symbols.clone(),
-        quotes: summaries,
-    })?)
+    summaries
+}
+
+/// Keeps one useful row per requested symbol, even when Schwab returns a generic `errors` entry.
+fn normalize_quote_summaries(
+    mut summaries: Vec<QuoteSummary>,
+    requested_symbols: &[String],
+) -> Vec<QuoteSummary> {
+    let generic_errors = summaries
+        .iter()
+        .filter(|summary| {
+            !requested_symbols
+                .iter()
+                .any(|requested| quote_summary_matches_request(summary, requested))
+        })
+        .filter_map(|summary| summary.error.as_ref().map(clone_quote_error))
+        .collect::<Vec<_>>();
+
+    summaries.retain(|summary| {
+        requested_symbols
+            .iter()
+            .any(|requested| quote_summary_matches_request(summary, requested))
+    });
+
+    for requested_symbol in requested_symbols {
+        if summaries
+            .iter()
+            .any(|summary| quote_summary_matches_request(summary, requested_symbol))
+        {
+            continue;
+        }
+
+        let error = generic_quote_error(&generic_errors, requested_symbol, requested_symbols.len())
+            .unwrap_or_else(|| missing_quote_error(requested_symbol.clone()));
+        summaries.push(missing_quote_summary(requested_symbol.clone(), error));
+    }
+
+    sort_quote_summaries(summaries)
+}
+
+/// Finds API-provided error details that apply to a missing requested symbol.
+fn generic_quote_error(
+    generic_errors: &[QuoteErrorSummary],
+    requested_symbol: &str,
+    requested_count: usize,
+) -> Option<QuoteErrorSummary> {
+    for error in generic_errors {
+        if error.invalid_symbols.as_ref().is_some_and(|invalid| {
+            invalid
+                .iter()
+                .any(|symbol| symbol.eq_ignore_ascii_case(requested_symbol))
+        }) {
+            return Some(clone_quote_error(error));
+        }
+    }
+
+    generic_errors
+        .iter()
+        .find(|error| requested_count == 1 || error.invalid_symbols.is_none())
+        .map(clone_quote_error)
+}
+
+/// Checks whether a normalized quote row corresponds to a user-requested symbol.
+fn quote_summary_matches_request(summary: &QuoteSummary, requested_symbol: &str) -> bool {
+    summary
+        .requested_symbol
+        .eq_ignore_ascii_case(requested_symbol)
+        || summary
+            .symbol
+            .as_deref()
+            .is_some_and(|symbol| symbol.eq_ignore_ascii_case(requested_symbol))
+}
+
+/// Builds a compact error row for requested symbols omitted from Schwab's quote map.
+fn missing_quote_summary(requested_symbol: String, error: QuoteErrorSummary) -> QuoteSummary {
+    QuoteSummary {
+        requested_symbol,
+        error: Some(error),
+        ..QuoteSummary::default()
+    }
+}
+
+/// Builds the fallback error used when Schwab omits a requested symbol without details.
+fn missing_quote_error(requested_symbol: String) -> QuoteErrorSummary {
+    QuoteErrorSummary {
+        invalid_symbols: Some(vec![requested_symbol]),
+        invalid_cusips: None,
+        invalid_ssids: None,
+    }
+}
+
+/// Clones API error details without making the private output type broadly cloneable.
+fn clone_quote_error(error: &QuoteErrorSummary) -> QuoteErrorSummary {
+    QuoteErrorSummary {
+        invalid_symbols: error.invalid_symbols.clone(),
+        invalid_cusips: error.invalid_cusips.clone(),
+        invalid_ssids: error.invalid_ssids.clone(),
+    }
+}
+
+/// Default token-optimized quote fields for compact row output.
+const DEFAULT_QUOTE_FIELDS: [&str; 10] = [
+    "req", "sym", "bid", "ask", "last", "mark", "chg", "pct", "vol", "err",
+];
+
+/// Parses the optional comma-separated quote field list, or returns the compact default.
+fn selected_quote_fields(requested: Option<&str>) -> Result<Vec<&'static str>, AppError> {
+    let Some(requested) = requested else {
+        return Ok(DEFAULT_QUOTE_FIELDS.to_vec());
+    };
+    let fields = requested
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        return Err(AppError::MarketValidation {
+            message: format!(
+                "quote --fields cannot be empty; hint: available fields: {}",
+                available_quote_fields().join(", ")
+            ),
+        });
+    }
+    validate_quote_fields(&fields)?;
+    Ok(fields
+        .iter()
+        .map(|field| canonical_quote_field(field))
+        .collect())
+}
+
+/// Validates user-requested quote field names and aliases.
+fn validate_quote_fields(requested: &[&str]) -> Result<(), AppError> {
+    let unknown = requested
+        .iter()
+        .filter(|field| canonical_quote_field(field).is_empty())
+        .copied()
+        .collect::<Vec<_>>();
+
+    if unknown.is_empty() {
+        return Ok(());
+    }
+
+    Err(AppError::MarketValidation {
+        message: format!(
+            "unknown quote field(s): {}; hint: available fields: {}",
+            unknown.join(", "),
+            available_quote_fields().join(", ")
+        ),
+    })
+}
+
+/// Projects quote summaries into a compact table-shaped response.
+#[must_use]
+fn select_quote_fields(summaries: &[QuoteSummary], fields: &[&str]) -> QuoteRowsOutput {
+    let columns = fields.iter().map(|field| (*field).to_string()).collect();
+    let rows = summaries
+        .iter()
+        .map(|summary| {
+            fields
+                .iter()
+                .map(|field| selected_quote_field_value(summary, field))
+                .collect()
+        })
+        .collect::<Vec<Vec<Value>>>();
+    QuoteRowsOutput {
+        columns,
+        row_count: rows.len(),
+        rows,
+    }
+}
+
+/// Maps accepted quote field aliases to their emitted compact column name.
+fn canonical_quote_field(field: &str) -> &'static str {
+    match field {
+        "requested_symbol" | "requested" | "req" => "req",
+        "symbol" | "sym" => "sym",
+        "asset_type" | "asset" | "type" => "asset",
+        "description" | "desc" => "desc",
+        "exchange" | "exch" => "exch",
+        "bid" => "bid",
+        "ask" => "ask",
+        "last" => "last",
+        "mark" => "mark",
+        "net_change" | "change" | "chg" => "chg",
+        "net_percent_change" | "percent_change" | "pct" | "chg_pct" => "pct",
+        "volume" | "vol" => "vol",
+        "quote_time" | "qt" => "qt",
+        "trade_time" | "tt" => "tt",
+        "security_status" | "status" => "status",
+        "realtime" | "rt" => "rt",
+        "underlying" | "und" => "und",
+        "put_call" | "cp" => "cp",
+        "strike_price" | "strike" => "strike",
+        "days_to_expiration" | "dte" => "dte",
+        "error" | "err" => "err",
+        _ => "",
+    }
+}
+
+/// Returns every accepted quote field name and alias for validation hints.
+fn available_quote_fields() -> Vec<&'static str> {
+    let mut fields = [
+        "requested_symbol",
+        "requested",
+        "req",
+        "symbol",
+        "sym",
+        "asset_type",
+        "asset",
+        "type",
+        "description",
+        "desc",
+        "exchange",
+        "exch",
+        "bid",
+        "ask",
+        "last",
+        "mark",
+        "net_change",
+        "change",
+        "chg",
+        "net_percent_change",
+        "percent_change",
+        "pct",
+        "chg_pct",
+        "volume",
+        "vol",
+        "quote_time",
+        "qt",
+        "trade_time",
+        "tt",
+        "security_status",
+        "status",
+        "realtime",
+        "rt",
+        "underlying",
+        "und",
+        "put_call",
+        "cp",
+        "strike_price",
+        "strike",
+        "days_to_expiration",
+        "dte",
+        "error",
+        "err",
+    ]
+    .to_vec();
+    fields.sort_unstable();
+    fields
+}
+
+/// Extracts a single selected quote field as a JSON value.
+fn selected_quote_field_value(summary: &QuoteSummary, field: &str) -> Value {
+    match field {
+        "req" => Value::String(summary.requested_symbol.clone()),
+        "sym" => option_string(&summary.symbol),
+        "asset" => option_string(&summary.asset_type),
+        "desc" => option_string(&summary.description),
+        "exch" => option_string(&summary.exchange),
+        "bid" => option_number(&summary.bid),
+        "ask" => option_number(&summary.ask),
+        "last" => option_number(&summary.last),
+        "mark" => option_number(&summary.mark),
+        "chg" => option_number(&summary.net_change),
+        "pct" => option_number(&summary.net_percent_change),
+        "vol" => option_i64(summary.volume),
+        "qt" => option_i64(summary.quote_time),
+        "tt" => option_i64(summary.trade_time),
+        "status" => option_string(&summary.security_status),
+        "rt" => summary.realtime.map_or(Value::Null, Value::Bool),
+        "und" => option_string(&summary.underlying),
+        "cp" => option_string(&summary.put_call),
+        "strike" => option_number(&summary.strike_price),
+        "dte" => summary.days_to_expiration.map_or(Value::Null, Value::from),
+        "err" => summary
+            .error
+            .as_ref()
+            .map_or(Value::Null, |error| to_value(error).unwrap_or(Value::Null)),
+        _ => Value::Null,
+    }
+}
+
+/// Converts an optional string into a JSON scalar or null.
+fn option_string(value: &Option<String>) -> Value {
+    value.clone().map_or(Value::Null, Value::String)
+}
+
+/// Converts an optional Schwab number into a JSON scalar or null.
+fn option_number(value: &Option<schwab::Number>) -> Value {
+    value.as_ref().map_or(Value::Null, |number| {
+        to_value(number).unwrap_or(Value::Null)
+    })
+}
+
+/// Converts an optional i64 into a JSON scalar or null.
+fn option_i64(value: Option<i64>) -> Value {
+    value.map_or(Value::Null, Value::from)
 }
 
 /// Extracts a field from an `Option<T>` by reference, returning `None` if the
@@ -257,6 +571,18 @@ struct QuoteOutput {
     symbols: Vec<String>,
     /// Normalized quote data for each symbol, sorted alphabetically by `requested_symbol`.
     quotes: Vec<QuoteSummary>,
+}
+
+/// Token-optimized table-shaped JSON envelope returned by default for `market quote`.
+#[derive(Debug, Serialize)]
+struct QuoteRowsOutput {
+    /// Ordered column names for every row value.
+    columns: Vec<String>,
+    /// Compact quote rows aligned with [`Self::columns`].
+    rows: Vec<Vec<Value>>,
+    /// Number of quote rows returned.
+    #[serde(rename = "rowCount")]
+    row_count: usize,
 }
 
 /// Flattened, agent-friendly view of any Schwab quote type.

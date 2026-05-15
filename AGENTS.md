@@ -30,7 +30,7 @@ src/
     mod.rs         - Stock order commands: buy, sell, sell-short, buy-to-cover + raw JSON
     tests.rs       - Equity module tests
   market/
-    mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote()
+    mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote(), compact quote rows
     tests.rs       - Market module tests
   verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_value()
   order/
@@ -135,6 +135,10 @@ expirations, chain, screen, contract
 
 Row-based output (columns + rows arrays) for expirations, chain, and screen. Flat object output for contract. All include underlying symbol context.
 
+### Market Quote Output
+
+`market quote` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount`. Default columns are `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, and `err` so per-symbol quote errors stay visible in compact output. Use `--fields` to select output columns by compact names or full aliases such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`. Use `--all-fields` to return full detailed quote objects. Use `--api-fields quote,reference` to limit Schwab quote field groups requested from the API.
+
 Recommended LLM workflow: `expirations` (pick date) -> `chain` (with filters) -> `contract` (for detail). Use `screen` for multi-criteria filtering with liquidity and pricing constraints.
 
 ## CLI Global Args
@@ -151,7 +155,7 @@ Commands output raw JSON data payloads directly (no wrapper). Errors output an `
 
 - 3 = auth errors
 - 4 = HTTP status errors
-- 10 = input/validation/config errors (includes ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
+- 10 = input/validation/config errors (includes market.validation_failed, ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
 - 11 = preview errors
 - 20 = IO/JSON/config errors (includes ta.calculation_error)
 

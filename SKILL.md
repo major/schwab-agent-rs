@@ -34,8 +34,12 @@ If you get `auth.token_missing`, run `login-url` then `exchange`. If `auth.expir
 ```bash
 schwab-agent market quote AAPL              # single quote
 schwab-agent market quote AAPL MSFT GOOG    # multiple quotes
+schwab-agent market quote AAPL --fields sym,last,pct,vol
+schwab-agent market quote AAPL --all-fields
 schwab-agent market history SPY             # price history (defaults are fine)
 ```
+
+Quote output defaults to token-efficient rows: `columns`, `rows`, and `rowCount`. Default columns are `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, and `err` so per-symbol quote errors stay visible in compact output. Use `--fields` for specific output columns, using compact names or full aliases such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`. Use `--all-fields` for full detailed quote objects. Use `--api-fields quote,reference` only to limit Schwab API field groups.
 
 Optional history flags: `--period-type`, `--period`, `--frequency-type`, `--frequency`, `--from`, `--to`, `--extended-hours`.
 
@@ -503,6 +507,7 @@ On error (non-zero exit code), read `hint` for recovery steps. Check `retryable`
 | `auth.required` | Auth needed | Run full auth flow |
 | `schwab.http_status` | API HTTP error | Check message for status code |
 | `input.empty_symbols` | No symbols given | Provide at least one symbol |
+| `market.validation_failed` | Invalid market-data params | Use a listed `--fields` value or read the error hint |
 | `order.validation_failed` | Bad order params | Check strike/expiration values |
 | `order.preview_failed` | Preview issue | Re-run preview (may have expired) |
 | `options.symbol_not_found` | Symbol has no options | Verify symbol is optionable |

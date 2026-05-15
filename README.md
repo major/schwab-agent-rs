@@ -79,8 +79,12 @@ Market data: `quote`, `history`.
 
 ```bash
 schwab-agent market quote AAPL MSFT
+schwab-agent market quote AAPL MSFT --fields sym,last,pct,vol
+schwab-agent market quote AAPL MSFT --all-fields
 schwab-agent market history SPY --period 10 --period-type day
 ```
+
+`market quote` is token-optimized by default. It returns `columns`, `rows`, and `rowCount` with compact default columns: `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, `err`. The `req` and `err` columns make per-symbol Schwab quote errors visible without expanding to the full detailed output. Use `--fields` to select output columns. Accepted aliases include full names such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`, plus compact names such as `req`, `sym`, `chg`, `pct`, `vol`, and `err`. Use `--all-fields` to return the full detailed quote objects. Use `--api-fields quote,reference` only when you need to limit Schwab quote field groups requested from the API.
 
 ### account
 

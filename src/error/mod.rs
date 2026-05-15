@@ -30,6 +30,9 @@ pub enum AppError {
     /// Options command input validation failed.
     #[error("{message}")]
     OptionsValidation { message: String },
+    /// Market-data command input validation failed.
+    #[error("{message}")]
+    MarketValidation { message: String },
     /// Not enough candle data to compute the indicator.
     #[error("not enough candle data for {indicator}: need {needed} candles, got {got}")]
     TaInsufficientData {
@@ -64,6 +67,7 @@ impl AppError {
             Self::OrderValidation(_) => 10,
             Self::AccountValidation(_) => 10,
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => 10,
+            Self::MarketValidation { .. } => 10,
             Self::TaInsufficientData { .. } | Self::TaInvalidInterval { .. } => 10,
             Self::TaCalculationError { .. } => 20,
             Self::Preview(_) => 11,
@@ -84,6 +88,7 @@ impl AppError {
             Self::AccountValidation(_) => "account.validation_failed",
             Self::OptionsSymbolNotFound { .. } => "options.symbol_not_found",
             Self::OptionsValidation { .. } => "options.validation_failed",
+            Self::MarketValidation { .. } => "market.validation_failed",
             Self::TaInsufficientData { .. } => "ta.insufficient_data",
             Self::TaInvalidInterval { .. } => "ta.invalid_interval",
             Self::TaCalculationError { .. } => "ta.calculation_error",
@@ -103,6 +108,7 @@ impl AppError {
             Self::OrderValidation(_) | Self::Preview(_) => "order",
             Self::AccountValidation(_) => "account",
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => "options",
+            Self::MarketValidation { .. } => "market",
             Self::TaInsufficientData { .. }
             | Self::TaInvalidInterval { .. }
             | Self::TaCalculationError { .. } => "ta",
@@ -132,6 +138,9 @@ impl AppError {
             Self::AccountValidation(_) => {
                 Some("Run account summary to list available account hashes and nicknames.")
             }
+            Self::MarketValidation { .. } => Some(
+                "Use --fields with one or more supported quote output fields, for example sym,last,pct,vol.",
+            ),
             Self::Schwab(schwab::Error::AuthExpired | schwab::Error::AuthRequired) => {
                 Some("Run auth refresh, or re-authenticate with auth login-url and auth exchange.")
             }

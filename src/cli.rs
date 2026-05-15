@@ -441,9 +441,17 @@ pub struct QuoteArgs {
     #[arg(required = true)]
     pub symbols: Vec<String>,
 
-    /// Schwab quote field groups to request, for example quote,reference.
-    #[arg(long)]
+    /// Comma-separated output fields. Defaults to req,sym,bid,ask,last,mark,chg,pct,vol,err.
+    #[arg(long, conflicts_with = "all_fields")]
     pub fields: Option<String>,
+
+    /// Return the full detailed quote object instead of compact rows.
+    #[arg(long, conflicts_with = "fields")]
+    pub all_fields: bool,
+
+    /// Schwab quote field groups to request from the API, for example quote,reference.
+    #[arg(long)]
+    pub api_fields: Option<String>,
 }
 
 /// Portfolio commands.
@@ -498,7 +506,7 @@ mod tests {
 
     use clap::{CommandFactory, Parser};
 
-    use super::{AccountCommand, Cli, Command, TaCommand, default_token_path};
+    use super::{AccountCommand, Cli, Command, MarketCommand, TaCommand, default_token_path};
 
     #[test]
     fn command_tree_is_valid() {
@@ -577,6 +585,38 @@ mod tests {
     fn command_name_market_quote() {
         let cli = Cli::parse_from(["schwab-agent", "market", "quote", "AAPL"]);
         assert_eq!(cli.command_name(), "market.quote");
+    }
+
+    #[test]
+    fn market_quote_fields_parse_output_and_api_fields() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "market",
+            "quote",
+            "AAPL",
+            "--fields",
+            "sym,last",
+            "--api-fields",
+            "quote,reference",
+        ]);
+
+        let Command::Market(MarketCommand::Quote(args)) = cli.command else {
+            panic!("expected market quote command");
+        };
+        assert_eq!(args.fields.as_deref(), Some("sym,last"));
+        assert_eq!(args.api_fields.as_deref(), Some("quote,reference"));
+        assert!(!args.all_fields);
+    }
+
+    #[test]
+    fn market_quote_all_fields_parses() {
+        let cli = Cli::parse_from(["schwab-agent", "market", "quote", "AAPL", "--all-fields"]);
+
+        let Command::Market(MarketCommand::Quote(args)) = cli.command else {
+            panic!("expected market quote command");
+        };
+        assert!(args.all_fields);
+        assert!(args.fields.is_none());
     }
 
     #[test]
