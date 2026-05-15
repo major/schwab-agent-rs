@@ -29,7 +29,7 @@ src/
   market/
     mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote()
     tests.rs       - Market module tests
-  verify.rs        - Post-place verification: OrderActionResult, verify_order(), action_envelope()
+  verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_envelope()
   order/
     mod.rs         - Option order dispatch, 15 named option strategies, inline tests
     builder.rs     - OCC symbol construction (21-char format), inline tests
@@ -57,7 +57,7 @@ src/
 - **market** - Market data (history, quote)
 - **account** - Account discovery and resolution (summary, resolve)
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
-- **order** - Option order workflow (build, preview, place, place-from-preview) + lifecycle (list, get, cancel)
+- **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
 - **portfolio** - Account snapshot with optional positions
 - **option** - Option chain data (expirations, chain, screen, contract)
 
@@ -83,9 +83,9 @@ Recommended LLM workflow: `preview --save-preview` -> `place-from-preview`.
 
 Agents should prefer limit-style pricing whenever practical: pass `--price` so single-leg orders use `LIMIT` and multi-leg orders use `NET_DEBIT` or `NET_CREDIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
 
-### Post-Place Verification
+### Post-Action Verification
 
-All mutable order actions (place, place-from-preview, place-raw, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place-order response only returns a Location header and order ID, not the actual order state.
+All mutable order actions (place, place-from-preview, place-raw, replace, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place/replace response only returns a Location header and order ID, not the actual order state.
 
 The verification module (`src/verify.rs`) provides:
 
@@ -95,10 +95,11 @@ The verification module (`src/verify.rs`) provides:
 
 ### Order Lifecycle Commands
 
-`order list`, `order get`, and `order cancel` manage existing orders.
+`order list`, `order get`, `order replace`, and `order cancel` manage existing orders.
 
 - **list**: All orders or per-account, with status filtering, date range, and `--recent` (24h lookback). Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days.
 - **get**: Single order by ID (positional arg), requires `--account`.
+- **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
 - **cancel**: Cancel by order ID (positive positional arg), requires `--account`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 
 ### Option Data Subcommands (4 total)
@@ -189,8 +190,8 @@ Always run both default and `decimal` feature configurations. CI does the same.
 - Order strategies hardcode contract type + direction (safety invariant)
 - Stock actions hardcode instruction (safety invariant)
 - Order commands produce dynamic command names (e.g., `order.build.long-call`, `stock.build.buy`)
-- Mutable order actions (place, cancel) use `verify::verify_order()` for post-action verification
-- Lifecycle commands (order list/get/cancel) use static command names (e.g., `order.list`, `order.get`, `order.cancel`)
+- Mutable order actions (place, replace, cancel) use `verify::verify_order()` for post-action verification
+- Lifecycle commands (order list/get/replace/cancel) use static command names (e.g., `order.list`, `order.get`, `order.replace`, `order.cancel`)
 
 ### Testing
 

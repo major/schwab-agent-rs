@@ -1,6 +1,6 @@
 //! Option order porcelain commands.
 //!
-//! Provides build, preview, and place workflows for 15 named option strategies.
+//! Provides build, preview, place, and replace workflows for 15 named option strategies.
 //! Every porcelain command hardcodes the contract type and direction so that an
 //! LLM (or human) cannot accidentally reverse a trade. Strike parameters use
 //! factual names (`--high-strike`, `--low-strike`) rather than directional names
@@ -583,7 +583,7 @@ pub enum StrategyCommand {
 // Order command enum
 // ---------------------------------------------------------------------------
 
-/// Order construction, preview, placement, and lifecycle management.
+/// Order construction, preview, placement, replacement, and lifecycle management.
 #[derive(Debug, Subcommand)]
 pub enum OrderCommand {
     /// Construct the order JSON locally without calling the API.
@@ -613,6 +613,13 @@ pub enum OrderCommand {
     /// the order to the Schwab API. Includes post-place verification.
     #[command(name = "place-from-preview")]
     PlaceFromPreview(PlaceFromPreviewArgs),
+
+    /// Replace an existing order with a newly built strategy payload.
+    ///
+    /// Builds the replacement payload from the same safe strategy commands used
+    /// by build/preview/place, submits it via Schwab's replace endpoint, and
+    /// verifies the resulting order with a follow-up GET.
+    Replace(OrderReplaceArgs),
 
     /// List orders for an account or all linked accounts.
     ///
@@ -670,6 +677,22 @@ pub struct PlaceFromPreviewArgs {
     pub digest: String,
 }
 
+/// Arguments for `order replace <order-id> <strategy>`.
+#[derive(Debug, Args)]
+pub struct OrderReplaceArgs {
+    /// Account hash or nickname (use `account summary` to list accounts).
+    #[arg(long)]
+    pub account: String,
+
+    /// Existing order ID to replace.
+    #[arg(value_parser = clap::value_parser!(i64).range(1..))]
+    pub order_id: i64,
+
+    /// Replacement strategy payload.
+    #[command(subcommand)]
+    pub strategy: StrategyCommand,
+}
+
 // ---------------------------------------------------------------------------
 // Command dispatch
 // ---------------------------------------------------------------------------
@@ -697,6 +720,9 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<CommandO
         }
         OrderCommand::PlaceFromPreview(args) => {
             do_place_from_preview(cli, &args.account, &args.digest).await
+        }
+        OrderCommand::Replace(args) => {
+            do_replace(cli, &args.account, args.order_id, &args.strategy).await
         }
         OrderCommand::List(args) => lifecycle::handle_list(cli, args).await,
         OrderCommand::Get(args) => lifecycle::handle_get(cli, args).await,
@@ -1030,6 +1056,41 @@ async fn do_place_from_preview(
     verify::action_envelope("order.place-from-preview", result)
 }
 
+/// Replaces an existing order with a strategy payload and verifies the result.
+async fn do_replace(
+    cli: &Cli,
+    account: &str,
+    order_id: i64,
+    strategy: &StrategyCommand,
+) -> Result<CommandOutput, AppError> {
+    let order = build_order(strategy)?;
+    let client = auth::provider(cli)?.client().await?;
+    let resolved = account::resolve_account(&client, account).await?;
+    let account_hash = resolved.account_hash;
+    let response = client
+        .replace_order(&account_hash, order_id, &order)
+        .await?;
+    let order_json = serialize_order(&order)?;
+    let new_order_id = response.order_id.ok_or_else(|| {
+        AppError::OrderValidation(
+            "replace response did not include the new order ID required for verification"
+                .to_string(),
+        )
+    })?;
+
+    let result = verify::verify_order(
+        &client,
+        &account_hash,
+        Some(new_order_id),
+        "replace",
+        response.location,
+        Some(order_json),
+    )
+    .await;
+
+    verify::action_envelope("order.replace", result)
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1179,6 +1240,58 @@ mod tests {
             "a".repeat(64).as_str(),
         ]);
         assert!(matches!(cli.command, crate::cli::Command::Order(_)));
+    }
+
+    #[test]
+    fn parse_replace_long_call() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "replace",
+            "--account",
+            "ABC123",
+            "12345678",
+            "long-call",
+            "AAPL",
+            "--expiration",
+            "2025-06-20",
+            "--strike",
+            "200",
+            "--price",
+            "5.50",
+        ]);
+
+        let crate::cli::Command::Order(crate::order::OrderCommand::Replace(args)) = cli.command
+        else {
+            panic!("expected order replace command");
+        };
+        assert_eq!(args.account, "ABC123");
+        assert_eq!(args.order_id, 12_345_678);
+        assert!(matches!(
+            args.strategy,
+            crate::order::StrategyCommand::LongCall(_)
+        ));
+    }
+
+    #[test]
+    fn parse_replace_rejects_non_positive_order_id() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "replace",
+                "--account",
+                "ABC123",
+                "0",
+                "long-call",
+                "AAPL",
+                "--expiration",
+                "2025-06-20",
+                "--strike",
+                "200",
+            ])
+            .is_err()
+        );
     }
 
     #[test]
