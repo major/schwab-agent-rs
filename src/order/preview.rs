@@ -165,10 +165,44 @@ pub fn load_preview(digest: &str, account_hash: &str) -> Result<SavedPreview, Ap
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        ffi::OsString,
+        path::Path,
+        sync::{LazyLock, Mutex},
+    };
+
     use schwab::{Duration, Instruction, PutCall, Session};
 
     use super::*;
     use crate::order::builder;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+
+            unsafe {
+                std::env::set_var(key, value);
+            }
+
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.as_ref() {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
 
     /// Builds a simple test order value for preview tests.
     fn test_order_value() -> Value {
@@ -252,5 +286,27 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid digest format"));
+    }
+
+    #[test]
+    fn load_rejects_account_mismatch() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let _state_home = EnvVarGuard::set_path("XDG_STATE_HOME", temp_dir.path());
+
+        let result = (|| {
+            let digest = save_preview("HASH_A", &test_order_value(), "order.preview.long-call")?;
+            load_preview(&digest, "HASH_B")
+        })();
+
+        let err = result.unwrap_err();
+        assert_eq!(err.exit_code(), 11);
+        match err {
+            AppError::Preview(message) => {
+                assert!(message.contains("preview was for account 'HASH_A'"));
+                assert!(message.contains("got account 'HASH_B'"));
+            }
+            other => panic!("expected AppError::Preview, got {other:?}"),
+        }
     }
 }

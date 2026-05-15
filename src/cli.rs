@@ -58,6 +58,8 @@ impl Cli {
             Command::Order(_) => "order",
             Command::Portfolio(PortfolioCommand::Snapshot(_)) => "portfolio.snapshot",
             Command::Stock(_) => "stock",
+            Command::Account(AccountCommand::Summary(_)) => "account.summary",
+            Command::Account(AccountCommand::Resolve(_)) => "account.resolve",
         }
     }
 
@@ -89,6 +91,9 @@ pub enum Command {
     /// Stock (equity) order construction, preview, and placement workflows.
     #[command(subcommand)]
     Stock(crate::equity::EquityCommand),
+    /// Account discovery and resolution workflows.
+    #[command(subcommand)]
+    Account(AccountCommand),
 }
 
 /// Authentication commands.
@@ -404,6 +409,30 @@ pub struct PortfolioSnapshotArgs {
     pub positions: bool,
 }
 
+/// Account commands.
+#[derive(Debug, Subcommand)]
+pub enum AccountCommand {
+    /// Get compact account summaries with balance and optional position data.
+    Summary(AccountSummaryArgs),
+    /// Resolve an account hash or nickname to its canonical account hash.
+    Resolve(AccountResolveArgs),
+}
+
+/// Arguments for `account summary`.
+#[derive(Debug, Args)]
+pub struct AccountSummaryArgs {
+    /// Include individual positions in each account summary.
+    #[arg(long)]
+    pub positions: bool,
+}
+
+/// Arguments for `account resolve`.
+#[derive(Debug, Args)]
+pub struct AccountResolveArgs {
+    /// Account hash or nickname to resolve.
+    pub selector: String,
+}
+
 fn default_token_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -417,7 +446,7 @@ mod tests {
 
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, default_token_path};
+    use super::{AccountCommand, Cli, Command, default_token_path};
 
     #[test]
     fn command_tree_is_valid() {
@@ -530,6 +559,60 @@ mod tests {
     fn command_name_portfolio_snapshot() {
         let cli = Cli::parse_from(["schwab-agent", "portfolio", "snapshot"]);
         assert_eq!(cli.command_name(), "portfolio.snapshot");
+    }
+
+    #[test]
+    fn command_name_account_summary() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "summary"]);
+        assert_eq!(cli.command_name(), "account.summary");
+    }
+
+    #[test]
+    fn command_name_account_summary_with_positions() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "summary", "--positions"]);
+        assert_eq!(cli.command_name(), "account.summary");
+    }
+
+    #[test]
+    fn command_name_account_resolve() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "resolve", "Trading"]);
+        assert_eq!(cli.command_name(), "account.resolve");
+    }
+
+    #[test]
+    fn parse_account_summary_no_flags() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "summary"]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(!args.positions);
+    }
+
+    #[test]
+    fn parse_account_summary_positions() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "summary", "--positions"]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(args.positions);
+    }
+
+    #[test]
+    fn parse_account_resolve_selector() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "resolve", "Trading"]);
+
+        let Command::Account(AccountCommand::Resolve(args)) = cli.command else {
+            panic!("expected account resolve command");
+        };
+        assert_eq!(args.selector, "Trading");
+    }
+
+    #[test]
+    fn parse_account_resolve_requires_selector() {
+        let result = Cli::try_parse_from(["schwab-agent", "account", "resolve"]);
+        assert!(result.is_err());
     }
 
     #[test]

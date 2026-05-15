@@ -1,5 +1,6 @@
 //! Agent-oriented JSON CLI porcelain for the `schwab` crate.
 
+pub mod account;
 mod auth;
 mod cli;
 mod equity;
@@ -68,6 +69,7 @@ pub async fn execute(cli: Cli) -> Result<CommandOutput, AppError> {
         Command::Order(_) => unreachable!("handled above"),
         Command::Portfolio(command) => portfolio::handle(&cli, command).await?,
         Command::Stock(_) => unreachable!("handled above"),
+        Command::Account(command) => account::handle(&cli, command).await?,
     };
     Ok(Envelope::success(command, data, Metadata::now()))
 }

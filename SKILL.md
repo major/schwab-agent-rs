@@ -35,11 +35,26 @@ schwab-agent market history SPY             # price history (defaults are fine)
 
 Optional history flags: `--period-type`, `--period`, `--frequency-type`, `--frequency`, `--from`, `--to`, `--extended-hours`.
 
+## Account
+
+Discover and resolve accounts before placing orders.
+
+Recommended workflow: `account summary` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
+
+```bash
+schwab-agent account summary                    # list accounts with balances
+schwab-agent account summary --positions        # include current holdings
+schwab-agent account resolve Trading            # resolve nickname to canonical hash
+schwab-agent account resolve ABCDEF1234567890  # verify a known hash
+```
+
+The `--account` flag on stock and order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
+
 ## Portfolio
 
 ```bash
-schwab-agent portfolio snapshot --account HASH
-schwab-agent portfolio snapshot --account HASH --positions   # include holdings
+schwab-agent portfolio snapshot            # account snapshot
+schwab-agent portfolio snapshot --positions   # include holdings
 ```
 
 ## Stock Orders
