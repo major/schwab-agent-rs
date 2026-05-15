@@ -36,26 +36,31 @@ pub fn validate_candles(
 }
 
 /// Extracts close prices from Schwab candles.
+#[allow(dead_code)]
 pub fn extract_closes(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError> {
     extract_prices(candles, "close", |candle| candle.close)
 }
 
 /// Extracts high prices from Schwab candles.
+#[allow(dead_code)]
 pub fn extract_highs(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError> {
     extract_prices(candles, "high", |candle| candle.high)
 }
 
 /// Extracts low prices from Schwab candles.
+#[allow(dead_code)]
 pub fn extract_lows(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError> {
     extract_prices(candles, "low", |candle| candle.low)
 }
 
 /// Extracts open prices from Schwab candles.
+#[allow(dead_code)]
 pub fn extract_opens(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError> {
     extract_prices(candles, "open", |candle| candle.open)
 }
 
 /// Extracts volumes from Schwab candles as `f64` values for indicator math.
+#[allow(dead_code)]
 pub fn extract_volumes(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError> {
     candles
         .iter()
@@ -70,6 +75,7 @@ pub fn extract_volumes(candles: &[schwab::Candle]) -> Result<Vec<f64>, AppError>
 }
 
 /// Extracts timestamps from Schwab candles, defaulting missing timestamps to zero.
+#[allow(dead_code)]
 #[must_use]
 pub fn extract_timestamps(candles: &[schwab::Candle]) -> Vec<i64> {
     candles
@@ -114,6 +120,7 @@ fn insufficient_data(needed: usize, got: usize) -> AppError {
     }
 }
 
+#[allow(dead_code)]
 fn extract_prices(
     candles: &[schwab::Candle],
     field: &'static str,

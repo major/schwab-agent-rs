@@ -36,8 +36,8 @@ struct ExpirationSelection {
 struct AtmContracts<'a> {
     call: &'a OptionContract,
     put: &'a OptionContract,
-    call_strike: f64,
-    put_strike: f64,
+    _call_strike: f64,
+    _put_strike: f64,
     call_price: f64,
     put_price: f64,
 }
@@ -243,8 +243,8 @@ fn find_atm_contracts<'a>(
     Ok(AtmContracts {
         call,
         put,
-        call_strike: strike,
-        put_strike: strike,
+        _call_strike: strike,
+        _put_strike: strike,
         call_price,
         put_price,
     })
@@ -405,8 +405,8 @@ mod tests {
         let selection = find_atm_contracts(&chain, "2026-06-19:35", 101.0)
             .expect("ATM contracts should be selected");
 
-        assert_close(selection.call_strike, 100.0);
-        assert_close(selection.put_strike, 100.0);
+        assert_close(selection._call_strike, 100.0);
+        assert_close(selection._put_strike, 100.0);
         assert_close(selection.call_price, 3.5);
         assert_close(selection.put_price, 3.2);
     }
