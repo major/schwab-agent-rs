@@ -48,6 +48,9 @@ pub enum AppError {
     /// Preview digest operation failed (save, load, verify, or expired).
     #[error("preview error: {0}")]
     Preview(String),
+    /// Mutable operations are disabled in the agent config.
+    #[error("mutable operations are disabled by default")]
+    MutableDisabled,
 }
 
 impl AppError {
@@ -64,6 +67,7 @@ impl AppError {
             Self::TaInsufficientData { .. } | Self::TaInvalidInterval { .. } => 10,
             Self::TaCalculationError { .. } => 20,
             Self::Preview(_) => 11,
+            Self::MutableDisabled => 10,
         }
     }
 
@@ -84,6 +88,7 @@ impl AppError {
             Self::TaInvalidInterval { .. } => "ta.invalid_interval",
             Self::TaCalculationError { .. } => "ta.calculation_error",
             Self::Preview(_) => "order.preview_failed",
+            Self::MutableDisabled => "config.mutable_disabled",
         }
     }
 
@@ -101,6 +106,7 @@ impl AppError {
             Self::TaInsufficientData { .. }
             | Self::TaInvalidInterval { .. }
             | Self::TaCalculationError { .. } => "ta",
+            Self::MutableDisabled => "config",
         }
     }
 
@@ -133,6 +139,9 @@ impl AppError {
             Self::TaInvalidInterval { .. } => {
                 Some("Valid intervals: daily, weekly, 1min, 5min, 15min, 30min")
             }
+            Self::MutableDisabled => Some(
+                "Set \"i-also-like-to-live-dangerously\": true in ~/.config/schwab-agent/config.json to enable order placement, cancellation, and replacement.",
+            ),
             _ => None,
         }
     }
@@ -159,6 +168,11 @@ fn classify_schwab_error(error: &schwab::Error) -> (i32, &'static str, &'static 
             (20, "config.base_url_invalid", "config")
         }
         schwab::Error::Encode(_) => (1, "json.encode_failed", "json"),
+        // Catch-all for schwab error variants added after our last explicit update.
+        // Prevents compilation failures when schwab adds new variants before we
+        // classify them. Revisit when bumping the schwab dependency.
+        #[allow(unreachable_patterns)]
+        _ => (1, "schwab.unknown", "schwab"),
     }
 }
 

@@ -19,6 +19,7 @@ src/
   cli.rs           - clap derive CLI definition with subcommands and global args
   output.rs        - Envelope<T> (versioned JSON wrapper: ok, command, data/error, warnings, meta)
   shared.rs        - Shared types: SessionChoice, DurationChoice, to_number() helper
+  config.rs        - Agent config: load shared config, mutable-operation guard
   error/
     mod.rs         - AppError enum (thiserror) with stable codes, exit codes, categories, hints
     tests.rs       - Error module tests
@@ -100,6 +101,15 @@ Recommended LLM workflow: `preview --save-preview` -> `place-from-preview`.
 
 Agents should prefer limit-style pricing whenever practical: pass `--price` so single-leg orders use `LIMIT` and multi-leg orders use `NET_DEBIT` or `NET_CREDIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
 
+### Mutable Operation Guard
+
+All mutable commands (place, place-from-preview, place-raw, replace, cancel) check `~/.config/schwab-agent/config.json` for `"i-also-like-to-live-dangerously": true` before executing. The config file is shared with the Go CLI.
+
+- Missing config file or missing key = mutable operations disabled (safe default)
+- Guard function: `config::require_mutable_enabled()` returns `AppError::MutableDisabled` (exit code 10, error code `config.mutable_disabled`)
+- Guard is called inside the order/equity dispatch handlers, before any API call
+- Read-only commands (build, preview, list, get) are NOT gated
+
 ### Post-Action Verification
 
 All mutable order actions (place, place-from-preview, place-raw, replace, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place/replace response only returns a Location header and order ID, not the actual order state.
@@ -154,7 +164,7 @@ Errors use the same envelope with `ErrorBody` in the `error` field. Schema versi
 
 - 3 = auth errors
 - 4 = HTTP status errors
-- 10 = input/validation errors (includes ta.insufficient_data, ta.invalid_interval)
+- 10 = input/validation/config errors (includes ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
 - 11 = preview errors
 - 20 = IO/JSON/config errors (includes ta.calculation_error)
 

@@ -13,6 +13,10 @@ export SCHWAB_CLIENT_SECRET="..."
 # Callback URL defaults to https://127.0.0.1:8182
 ```
 
+## Mutable Operation Guard
+
+All mutable commands (place, place-from-preview, place-raw, replace, cancel) require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, list, get) are not gated.
+
 ## Auth
 
 ```bash
@@ -511,4 +515,5 @@ Check `ok` first. On error, read `error.hint` for recovery steps. Check `error.r
 | `options.validation_failed` | Invalid option params | Check expiration/strike values |
 | `ta.insufficient_data` | Not enough candle data | Try a shorter interval or fewer points |
 | `ta.invalid_interval` | Unrecognized interval | Use: daily, weekly, 1min, 5min, 15min, 30min |
+| `config.mutable_disabled` | Mutable ops disabled | Set `"i-also-like-to-live-dangerously": true` in config |
 | `ta.calculation_error` | Indicator math failed | Check input data quality |

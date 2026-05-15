@@ -145,6 +145,7 @@ pub(crate) async fn handle_cancel(
     cli: &Cli,
     args: &OrderCancelArgs,
 ) -> Result<CommandOutput, AppError> {
+    crate::config::require_mutable_enabled()?;
     let client = auth::provider(cli)?.client().await?;
     client.cancel_order(&args.account, args.order_id).await?;
 

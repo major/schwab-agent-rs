@@ -61,6 +61,18 @@ export SCHWAB_CLIENT_SECRET="your-client-secret"
 
 Global CLI flags (`--token`, `--client-id`, `--client-secret`, `--callback-url`) are also available.
 
+### Mutable Operation Guard
+
+All mutable commands (place, place-from-preview, place-raw, replace, cancel) are disabled by default. To enable them, set `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`:
+
+```json
+{
+  "i-also-like-to-live-dangerously": true
+}
+```
+
+This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, list, get, quote, etc.) are not affected.
+
 ## Command Groups
 
 ### auth

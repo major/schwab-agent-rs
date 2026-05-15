@@ -236,6 +236,20 @@ fn schwab_encode_classification() {
     assert!(err.hint().is_none());
 }
 
+#[test]
+fn mutable_disabled_classification() {
+    let err = AppError::MutableDisabled;
+    assert_eq!(err.exit_code(), 10);
+    assert_eq!(err.code(), "config.mutable_disabled");
+    assert_eq!(err.category(), "config");
+    assert!(!err.retryable());
+    assert!(
+        err.hint()
+            .unwrap()
+            .contains("i-also-like-to-live-dangerously")
+    );
+}
+
 // -- Display messages ----------------------------------------------------------
 
 #[test]
@@ -270,6 +284,12 @@ fn display_options_validation() {
         message: "bad input".to_string(),
     };
     assert!(err.to_string().contains("bad input"));
+}
+
+#[test]
+fn display_mutable_disabled() {
+    let err = AppError::MutableDisabled;
+    assert!(err.to_string().contains("mutable operations"));
 }
 
 // -- hint() coverage for wildcard arm ------------------------------------------

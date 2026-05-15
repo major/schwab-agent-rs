@@ -4,6 +4,7 @@ pub mod account;
 mod analyze;
 mod auth;
 mod cli;
+mod config;
 mod equity;
 mod error;
 mod market;
