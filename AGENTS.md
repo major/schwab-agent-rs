@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is a path dependency at `../schwab-rs` and must exist to build.
+Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is resolved from crates.io for CI compatibility.
 
 - Edition 2024, MSRV 1.88
 - `publish = false` (private crate)
@@ -29,10 +29,12 @@ src/
   market/
     mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote()
     tests.rs       - Market module tests
+  verify.rs        - Post-place verification: OrderActionResult, verify_order(), action_envelope()
   order/
     mod.rs         - Option order dispatch, 15 named option strategies, inline tests
     builder.rs     - OCC symbol construction (21-char format), inline tests
     preview.rs     - SHA-256 tamper-evident preview with 15-min TTL (shared by equity + order)
+    lifecycle.rs   - Order lifecycle commands: list, get, cancel with post-action verification
   portfolio/
     mod.rs         - Portfolio snapshot with optional positions
     tests.rs       - Portfolio module tests
@@ -51,7 +53,7 @@ src/
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
-- **order** - Option order workflow (build, preview, place, place-from-preview)
+- **order** - Option order workflow (build, preview, place, place-from-preview) + lifecycle (list, get, cancel)
 - **portfolio** - Account snapshot with optional positions
 - **option** - Option chain data (expirations, chain, screen, contract)
 
@@ -76,6 +78,24 @@ Recommended LLM workflow: `preview --save-preview` -> `place-from-preview`.
 `build` is an optional local dry run. Direct `place` is available for explicit human requests, but LLM agents should use saved previews because `place-from-preview` submits the exact saved preview payload after the SHA-256 digest, 15-minute TTL, and account checks pass. Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 Agents should prefer limit-style pricing whenever practical: pass `--price` so single-leg orders use `LIMIT` and multi-leg orders use `NET_DEBIT` or `NET_CREDIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
+
+### Post-Place Verification
+
+All mutable order actions (place, place-from-preview, place-raw, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place-order response only returns a Location header and order ID, not the actual order state.
+
+The verification module (`src/verify.rs`) provides:
+
+- `OrderActionResult` struct with the existing `order_id`, `location`, and submitted `order` fields, plus `verification_state` ("verified" or "unverified"), optional `verification_failures`, and the follow-up GET payload in `verified_order`
+- `verify_order()` does a best-effort GET after any mutable action; on failure it returns `unverified` with failure details instead of propagating the error
+- `action_envelope()` builds the Envelope with warnings extracted from unverified failures
+
+### Order Lifecycle Commands
+
+`order list`, `order get`, and `order cancel` manage existing orders.
+
+- **list**: All orders or per-account, with status filtering, date range, and `--recent` (24h lookback). Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days.
+- **get**: Single order by ID (positional arg), requires `--account`.
+- **cancel**: Cancel by order ID (positive positional arg), requires `--account`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 
 ### Option Data Subcommands (4 total)
 
@@ -119,7 +139,7 @@ Errors use the same envelope with `ErrorBody` in the `error` field. Schema versi
 ## Key Dependencies
 
 - `clap` (derive) - CLI parsing
-- `schwab` (path dep `../schwab-rs`) - Schwab API client
+- `schwab` - Schwab API client
 - `serde` / `serde_json` - Serialization
 - `serde_with` - `skip_serializing_none` for clean JSON
 - `thiserror` - Error derivation
@@ -150,7 +170,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 ### Code Style
 
-- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, portfolio; inline tests for lib, cli, output, builder, preview, order/mod
+- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, portfolio; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle
 - Docstrings on all public items and many private items
 - `#[must_use]` on pure functions
 - `serde_with::skip_serializing_none` for clean JSON output
@@ -165,6 +185,8 @@ Always run both default and `decimal` feature configurations. CI does the same.
 - Order strategies hardcode contract type + direction (safety invariant)
 - Stock actions hardcode instruction (safety invariant)
 - Order commands produce dynamic command names (e.g., `order.build.long-call`, `stock.build.buy`)
+- Mutable order actions (place, cancel) use `verify::verify_order()` for post-action verification
+- Lifecycle commands (order list/get/cancel) use static command names (e.g., `order.list`, `order.get`, `order.cancel`)
 
 ### Testing
 

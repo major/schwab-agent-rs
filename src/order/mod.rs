@@ -23,6 +23,7 @@
 //! market order.
 
 pub(crate) mod builder;
+pub(crate) mod lifecycle;
 pub(crate) mod preview;
 
 use clap::{Args, Subcommand};
@@ -33,6 +34,7 @@ use crate::cli::Cli;
 use crate::error::AppError;
 use crate::output::{CommandOutput, Envelope, Metadata};
 use crate::shared::{DurationChoice, SessionChoice};
+use crate::verify;
 
 use builder::OptionOrder;
 
@@ -577,10 +579,10 @@ pub enum StrategyCommand {
 }
 
 // ---------------------------------------------------------------------------
-// Order command enum (build / preview / place / place-from-preview)
+// Order command enum
 // ---------------------------------------------------------------------------
 
-/// Order construction, preview, and placement workflows.
+/// Order construction, preview, placement, and lifecycle management.
 #[derive(Debug, Subcommand)]
 pub enum OrderCommand {
     /// Construct the order JSON locally without calling the API.
@@ -599,16 +601,32 @@ pub enum OrderCommand {
     /// Place the order directly via the Schwab API.
     ///
     /// Builds the order from the strategy arguments and submits it.
-    /// The order will be live immediately upon acceptance.
+    /// The order will be live immediately upon acceptance. Includes
+    /// post-place verification via a follow-up GET.
     Place(OrderPlaceArgs),
 
     /// Place an order from a previously saved preview digest.
     ///
     /// Loads the exact order payload that was previewed, verifies the
     /// digest for tamper detection, checks the 15-minute TTL, and submits
-    /// the order to the Schwab API.
+    /// the order to the Schwab API. Includes post-place verification.
     #[command(name = "place-from-preview")]
     PlaceFromPreview(PlaceFromPreviewArgs),
+
+    /// List orders for an account or all linked accounts.
+    ///
+    /// Returns orders within a time range (default: last 60 days).
+    /// Use --recent for the last 24 hours. Optionally filter by status.
+    List(lifecycle::OrderListArgs),
+
+    /// Retrieve a single order by ID.
+    Get(lifecycle::OrderGetArgs),
+
+    /// Cancel an order by ID.
+    ///
+    /// After cancellation, verifies the status via a follow-up GET so
+    /// the agent can confirm the order was actually canceled.
+    Cancel(lifecycle::OrderCancelArgs),
 }
 
 /// Arguments for `order preview <strategy>`.
@@ -674,17 +692,14 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<CommandO
         }
         OrderCommand::Place(args) => {
             let name = format!("order.place.{}", strategy_name(&args.strategy));
-            let data = do_place(cli, &args.account, &args.strategy).await?;
-            Ok(Envelope::success(&name, data, Metadata::now()))
+            do_place(cli, &args.account, &args.strategy, &name).await
         }
         OrderCommand::PlaceFromPreview(args) => {
-            let data = do_place_from_preview(cli, &args.account, &args.digest).await?;
-            Ok(Envelope::success(
-                "order.place-from-preview",
-                data,
-                Metadata::now(),
-            ))
+            do_place_from_preview(cli, &args.account, &args.digest).await
         }
+        OrderCommand::List(args) => lifecycle::handle_list(cli, args).await,
+        OrderCommand::Get(args) => lifecycle::handle_get(cli, args).await,
+        OrderCommand::Cancel(args) => lifecycle::handle_cancel(cli, args).await,
     }
 }
 
@@ -956,33 +971,56 @@ async fn do_preview(
     Ok(data)
 }
 
-/// Places the order directly via the Schwab API.
-async fn do_place(cli: &Cli, account: &str, strategy: &StrategyCommand) -> Result<Value, AppError> {
+/// Places the order directly via the Schwab API with post-place verification.
+async fn do_place(
+    cli: &Cli,
+    account: &str,
+    strategy: &StrategyCommand,
+    command_name: &str,
+) -> Result<CommandOutput, AppError> {
     let order = build_order(strategy)?;
     let client = auth::provider(cli)?.client().await?;
     let response = client.place_order(account, &order).await?;
     let order_json = serialize_order(&order)?;
 
-    Ok(serde_json::json!({
-        "order": order_json,
-        "order_id": response.order_id,
-        "location": response.location,
-    }))
+    let result = verify::verify_order(
+        &client,
+        account,
+        response.order_id,
+        "place",
+        response.location,
+        Some(order_json),
+    )
+    .await;
+
+    verify::action_envelope(command_name, result)
 }
 
-/// Places an order from a previously saved preview digest.
-async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
+/// Places an order from a previously saved preview digest with post-place
+/// verification.
+async fn do_place_from_preview(
+    cli: &Cli,
+    account: &str,
+    digest: &str,
+) -> Result<CommandOutput, AppError> {
     let saved = preview::load_preview(digest, account)?;
     let client = auth::provider(cli)?.client().await?;
     let response = client.place_order(account, &saved.order).await?;
 
-    Ok(serde_json::json!({
-        "order": saved.order,
-        "order_id": response.order_id,
-        "location": response.location,
-        "digest": digest,
-        "original_command": saved.command,
-    }))
+    let mut result = verify::verify_order(
+        &client,
+        account,
+        response.order_id,
+        "place",
+        response.location,
+        Some(saved.order),
+    )
+    .await;
+
+    result.digest = Some(digest.to_string());
+    result.original_command = Some(saved.command);
+
+    verify::action_envelope("order.place-from-preview", result)
 }
 
 // ---------------------------------------------------------------------------
