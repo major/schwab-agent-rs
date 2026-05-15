@@ -43,7 +43,7 @@ pub(super) fn render_chain(chain: &OptionChain, args: &ChainArgs) -> Result<Valu
 
     Ok(json!({
         "underlying": args.symbol,
-        "underlyingPrice": underlying_price.map(|price| to_value(price).unwrap_or(Value::Null)),
+        "underlyingPrice": underlying_price.map(|price| to_value(price).unwrap_or_default()),
         "columns": columns,
         "rows": rows,
         "rowCount": rows.len(),

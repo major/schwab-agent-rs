@@ -29,8 +29,8 @@ pub struct FieldDef {
     pub extractor: fn(&OptionContract) -> Option<Value>,
 }
 
-/// Default compact option chain fields.
-pub static CHAIN_FIELDS: [&str; 16] = [
+/// Shared compact option chain field set used by table-shaped outputs.
+const DEFAULT_OPTION_FIELDS: [&str; 16] = [
     "symbol",
     "expiration",
     "dte",
@@ -49,25 +49,11 @@ pub static CHAIN_FIELDS: [&str; 16] = [
     "iv",
 ];
 
+/// Default compact option chain fields.
+pub static CHAIN_FIELDS: [&str; 16] = DEFAULT_OPTION_FIELDS;
+
 /// Default option screen fields.
-pub static SCREEN_FIELDS: [&str; 16] = [
-    "symbol",
-    "expiration",
-    "dte",
-    "strike",
-    "type",
-    "bid",
-    "ask",
-    "mark",
-    "last",
-    "volume",
-    "openInterest",
-    "delta",
-    "gamma",
-    "theta",
-    "vega",
-    "iv",
-];
+pub static SCREEN_FIELDS: [&str; 16] = DEFAULT_OPTION_FIELDS;
 
 const FIELD_DEFS: &[(&str, FieldDef)] = &[
     ("expiration", FieldDef::computed("expiration")),
@@ -516,7 +502,7 @@ fn selected_field_value(contract: &FlatContract, field: &str) -> Value {
     match field {
         "expiration" | "expiry" => Value::String(contract.expiration.clone()),
         "dte" => Value::from(contract.dte),
-        "strike" => to_value(contract.strike).unwrap_or(Value::Null),
+        "strike" => to_value(contract.strike).unwrap_or_default(),
         "type" => Value::String(contract.contract_type.clone()),
         "contract_type" | "cp" => Value::String(contract.contract_type.clone()),
         "symbol" => option_value(&contract.symbol),
@@ -554,7 +540,7 @@ fn selected_field_value(contract: &FlatContract, field: &str) -> Value {
 }
 
 fn option_value(value: &Option<Value>) -> Value {
-    value.clone().unwrap_or(Value::Null)
+    value.clone().unwrap_or_default()
 }
 
 fn extracted_field(contract: &OptionContract, field: &str) -> Option<Value> {
