@@ -44,6 +44,7 @@ impl Cli {
     #[must_use]
     pub fn command_name(&self) -> &'static str {
         match &self.command {
+            Command::Analyze(_) => "analyze",
             Command::Auth(AuthCommand::Status) => "auth.status",
             Command::Auth(AuthCommand::Login(_)) => "auth.login",
             Command::Auth(AuthCommand::LoginUrl(_)) => "auth.login_url",
@@ -58,6 +59,8 @@ impl Cli {
             Command::Order(_) => "order",
             Command::Portfolio(PortfolioCommand::Snapshot(_)) => "portfolio.snapshot",
             Command::Stock(_) => "stock",
+            Command::Ta(TaCommand::Dashboard(_)) => "ta.dashboard",
+            Command::Ta(TaCommand::ExpectedMove(_)) => "ta.expected-move",
             Command::Account(AccountCommand::Summary(_)) => "account.summary",
             Command::Account(AccountCommand::Resolve(_)) => "account.resolve",
         }
@@ -73,6 +76,8 @@ impl Cli {
 /// Top-level command groups.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Multi-symbol analysis combining quote and technical analysis dashboard.
+    Analyze(AnalyzeArgs),
     /// Authentication commands for token setup and inspection.
     #[command(subcommand)]
     Auth(AuthCommand),
@@ -91,9 +96,61 @@ pub enum Command {
     /// Stock (equity) order construction, preview, and placement workflows.
     #[command(subcommand)]
     Stock(crate::equity::EquityCommand),
+    /// Technical analysis indicator workflows.
+    #[command(subcommand)]
+    Ta(TaCommand),
     /// Account discovery and resolution workflows.
     #[command(subcommand)]
     Account(AccountCommand),
+}
+
+/// Technical analysis commands.
+#[derive(Debug, Subcommand)]
+pub enum TaCommand {
+    /// Run all indicators for a symbol and return a category-grouped dashboard.
+    Dashboard(DashboardArgs),
+    /// Compute expected move from the option chain's ATM straddle.
+    #[command(name = "expected-move")]
+    ExpectedMove(ExpectedMoveArgs),
+}
+
+/// Arguments for `ta dashboard`.
+#[derive(Debug, Args)]
+pub struct DashboardArgs {
+    /// Ticker symbol, for example AAPL.
+    #[arg(required = true)]
+    pub symbol: String,
+    /// Candle interval.
+    #[arg(long, default_value = "daily")]
+    pub interval: String,
+    /// Number of data points to return per indicator series.
+    #[arg(long, default_value = "20")]
+    pub points: usize,
+}
+
+/// Arguments for `ta expected-move`.
+#[derive(Debug, Args)]
+pub struct ExpectedMoveArgs {
+    /// Ticker symbol, for example AAPL.
+    #[arg(required = true)]
+    pub symbol: String,
+    /// Target days to expiration for the option chain.
+    #[arg(long, default_value = "30")]
+    pub dte: u32,
+}
+
+/// Arguments for the top-level `analyze` command.
+#[derive(Debug, Args)]
+pub struct AnalyzeArgs {
+    /// One or more ticker symbols to analyze.
+    #[arg(required = true)]
+    pub symbols: Vec<String>,
+    /// Candle interval for the dashboard.
+    #[arg(long, default_value = "daily")]
+    pub interval: String,
+    /// Number of data points to return per indicator series.
+    #[arg(long, default_value = "20")]
+    pub points: usize,
 }
 
 /// Authentication commands.
@@ -446,7 +503,7 @@ mod tests {
 
     use clap::{CommandFactory, Parser};
 
-    use super::{AccountCommand, Cli, Command, default_token_path};
+    use super::{AccountCommand, Cli, Command, TaCommand, default_token_path};
 
     #[test]
     fn command_tree_is_valid() {
@@ -457,6 +514,12 @@ mod tests {
     fn command_name_auth_status() {
         let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
         assert_eq!(cli.command_name(), "auth.status");
+    }
+
+    #[test]
+    fn command_name_analyze() {
+        let cli = Cli::parse_from(["schwab-agent", "analyze", "AAPL"]);
+        assert_eq!(cli.command_name(), "analyze");
     }
 
     #[test]
@@ -580,6 +643,18 @@ mod tests {
     }
 
     #[test]
+    fn command_name_ta_dashboard() {
+        let cli = Cli::parse_from(["schwab-agent", "ta", "dashboard", "AAPL"]);
+        assert_eq!(cli.command_name(), "ta.dashboard");
+    }
+
+    #[test]
+    fn command_name_ta_expected_move() {
+        let cli = Cli::parse_from(["schwab-agent", "ta", "expected-move", "AAPL"]);
+        assert_eq!(cli.command_name(), "ta.expected-move");
+    }
+
+    #[test]
     fn parse_account_summary_no_flags() {
         let cli = Cli::parse_from(["schwab-agent", "account", "summary"]);
 
@@ -613,6 +688,93 @@ mod tests {
     fn parse_account_resolve_requires_selector() {
         let result = Cli::try_parse_from(["schwab-agent", "account", "resolve"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_ta_dashboard_defaults() {
+        let cli = Cli::parse_from(["schwab-agent", "ta", "dashboard", "AAPL"]);
+
+        let Command::Ta(TaCommand::Dashboard(args)) = cli.command else {
+            panic!("expected ta dashboard command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.interval, "daily");
+        assert_eq!(args.points, 20);
+    }
+
+    #[test]
+    fn parse_ta_dashboard_custom_interval_and_points() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "ta",
+            "dashboard",
+            "AAPL",
+            "--interval",
+            "weekly",
+            "--points",
+            "10",
+        ]);
+
+        let Command::Ta(TaCommand::Dashboard(args)) = cli.command else {
+            panic!("expected ta dashboard command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.interval, "weekly");
+        assert_eq!(args.points, 10);
+    }
+
+    #[test]
+    fn parse_ta_expected_move_defaults() {
+        let cli = Cli::parse_from(["schwab-agent", "ta", "expected-move", "AAPL"]);
+
+        let Command::Ta(TaCommand::ExpectedMove(args)) = cli.command else {
+            panic!("expected ta expected-move command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.dte, 30);
+    }
+
+    #[test]
+    fn parse_ta_expected_move_custom_dte() {
+        let cli = Cli::parse_from(["schwab-agent", "ta", "expected-move", "AAPL", "--dte", "45"]);
+
+        let Command::Ta(TaCommand::ExpectedMove(args)) = cli.command else {
+            panic!("expected ta expected-move command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.dte, 45);
+    }
+
+    #[test]
+    fn parse_analyze_multiple_symbols() {
+        let cli = Cli::parse_from(["schwab-agent", "analyze", "AAPL", "MSFT"]);
+
+        let Command::Analyze(args) = cli.command else {
+            panic!("expected analyze command");
+        };
+        assert_eq!(args.symbols, ["AAPL", "MSFT"]);
+        assert_eq!(args.interval, "daily");
+        assert_eq!(args.points, 20);
+    }
+
+    #[test]
+    fn parse_analyze_custom_interval_and_points() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "analyze",
+            "AAPL",
+            "--interval",
+            "daily",
+            "--points",
+            "5",
+        ]);
+
+        let Command::Analyze(args) = cli.command else {
+            panic!("expected analyze command");
+        };
+        assert_eq!(args.symbols, ["AAPL"]);
+        assert_eq!(args.interval, "daily");
+        assert_eq!(args.points, 5);
     }
 
     #[test]

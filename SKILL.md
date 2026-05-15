@@ -427,6 +427,58 @@ schwab-agent-rs option contract SPY --expiration 2025-06-20 --strike 550 --put
 
 All three flags are required: `--expiration YYYY-MM-DD`, `--strike N`, and one of `--call` or `--put`.
 
+## Technical Analysis
+
+Read-only TA commands. No orders are placed.
+
+### Dashboard
+
+Runs all indicators for a symbol and returns category-grouped output: trend, momentum, volatility, and volume. Includes derived fields (ATR percent, relative volume, distance from SMAs) and signal interpretations.
+
+```bash
+schwab-agent ta dashboard AAPL                          # daily dashboard, 20 points
+schwab-agent ta dashboard SPY --interval weekly --points 10
+```
+
+Dashboard flags:
+
+| Flag | Description |
+|---|---|
+| `--interval INTERVAL` | Candle interval: daily (default), weekly, 1min, 5min, 15min, 30min |
+| `--points N` | Number of data points per indicator series (default: 20) |
+
+### Expected Move
+
+Computes expected move from the ATM straddle price in the option chain. Output includes straddle price, expected move (price and percent), upper/lower ranges, and implied volatility from ATM options.
+
+```bash
+schwab-agent ta expected-move AAPL                      # 30-day expected move
+schwab-agent ta expected-move SPY --dte 45
+```
+
+Expected-move flags:
+
+| Flag | Description |
+|---|---|
+| `--dte N` | Target days to expiration for the option chain (default: 30) |
+
+## Analyze
+
+Multi-symbol analysis combining quote and TA dashboard per symbol. Partial-failure: if some symbols fail, the envelope returns `ok: true` with partial data and warnings for the failed symbols. All symbols failing returns `ok: false`.
+
+```bash
+schwab-agent analyze AAPL                    # single symbol
+schwab-agent analyze AAPL MSFT GOOG          # multiple symbols
+schwab-agent analyze AAPL --interval weekly --points 10
+```
+
+Analyze flags:
+
+| Flag | Description |
+|---|---|
+| `--interval INTERVAL` | Candle interval (same values as ta dashboard) |
+| `--points N` | Number of data points per indicator series (default: 20) |
+
 ## Output Format
 
 Every response is a JSON envelope:
@@ -457,3 +509,6 @@ Check `ok` first. On error, read `error.hint` for recovery steps. Check `error.r
 | `order.preview_failed` | Preview issue | Re-run preview (may have expired) |
 | `options.symbol_not_found` | Symbol has no options | Verify symbol is optionable |
 | `options.validation_failed` | Invalid option params | Check expiration/strike values |
+| `ta.insufficient_data` | Not enough candle data | Try a shorter interval or fewer points |
+| `ta.invalid_interval` | Unrecognized interval | Use: daily, weekly, 1min, 5min, 15min, 30min |
+| `ta.calculation_error` | Indicator math failed | Check input data quality |

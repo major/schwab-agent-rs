@@ -51,6 +51,19 @@ src/
     chain.rs       - Chain command: option chain with server+client filtering
     contract.rs    - Contract lookup: single contract with curated flat output
     screen.rs      - Screen command: chain screening with liquidity/pricing filters
+  ta/
+    mod.rs           - Module root: re-exports dashboard handler
+    types.rs         - Output types: DashboardOutput, ExpectedMoveOutput, AnalyzeOutput, signal types
+    indicators.rs    - 8 hand-rolled TA indicators: SMA, EMA, RSI, MACD, ATR, BBands, Stochastic, ADX
+    custom.rs        - Custom indicators: VWAP, Historical Volatility
+    interval.rs      - Interval enum, Schwab API parameter mapping
+    candles.rs       - Candle data extraction and validation helpers
+    dashboard.rs     - Dashboard command handler with category-grouped output
+    expected_move.rs - Expected move from ATM option straddle pricing
+    tests.rs         - TA module tests
+  analyze/
+    mod.rs           - Multi-symbol analyze command with partial-failure support
+    tests.rs         - Analyze module tests
 ```
 
 ## Command Groups
@@ -62,6 +75,8 @@ src/
 - **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
 - **portfolio** - Account snapshot with optional positions
 - **option** - Option chain data (expirations, chain, screen, contract)
+- **ta** - Technical analysis (dashboard, expected-move)
+- **analyze** - Multi-symbol analysis with partial-failure support
 
 ### Stock Actions (4 total)
 
@@ -139,9 +154,9 @@ Errors use the same envelope with `ErrorBody` in the `error` field. Schema versi
 
 - 3 = auth errors
 - 4 = HTTP status errors
-- 10 = input/validation errors
+- 10 = input/validation errors (includes ta.insufficient_data, ta.invalid_interval)
 - 11 = preview errors
-- 20 = IO/JSON/config errors
+- 20 = IO/JSON/config errors (includes ta.calculation_error)
 
 ## Key Dependencies
 
