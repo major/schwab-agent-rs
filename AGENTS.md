@@ -30,7 +30,7 @@ src/
     mod.rs         - Stock order commands: buy, sell, sell-short, buy-to-cover + raw JSON
     tests.rs       - Equity module tests
   market/
-    mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote(), compact quote rows
+    mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote(), compact quote/history rows
     tests.rs       - Market module tests
   verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_value()
   order/
@@ -135,9 +135,11 @@ expirations, chain, screen, contract
 
 Row-based output (columns + rows arrays) for expirations, chain, and screen. Flat object output for contract. All include underlying symbol context.
 
-### Market Quote Output
+### Market Quote and History Output
 
 `market quote` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount`. Default columns are `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, and `err` so per-symbol quote errors stay visible in compact output. Use `--fields` to select output columns by compact names or full aliases such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`. Use `--all-fields` to return full detailed quote objects. Use `--api-fields quote,reference` to limit Schwab quote field groups requested from the API.
+
+`market history` is token-optimized by default and returns row-based output with `symbol`, `columns`, `rows`, and `rowCount`. Default columns are `ts`, `open`, `high`, `low`, `close`, and `vol`. Use `--fields` to select candle columns by compact names or aliases such as `timestamp`, `datetime`, `datetimeISO8601`, `iso`, `o`, `h`, `l`, `c`, and `volume`. Use `--all-fields` to return the full Schwab price history object, including previous-close metadata and raw candle objects.
 
 Recommended LLM workflow: `expirations` (pick date) -> `chain` (with filters) -> `contract` (for detail). Use `screen` for multi-criteria filtering with liquidity and pricing constraints.
 

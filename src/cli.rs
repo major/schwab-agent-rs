@@ -405,6 +405,14 @@ pub struct HistoryArgs {
     #[arg(required = true)]
     pub symbol: String,
 
+    /// Comma-separated output fields. Defaults to ts,open,high,low,close,vol.
+    #[arg(long, conflicts_with = "all_fields")]
+    pub fields: Option<String>,
+
+    /// Return the full Schwab price history object instead of compact rows.
+    #[arg(long, conflicts_with = "fields")]
+    pub all_fields: bool,
+
     /// Period type (day, month, year, ytd).
     #[arg(long)]
     pub period_type: Option<String>,
@@ -564,6 +572,8 @@ mod tests {
             "market",
             "history",
             "AAPL",
+            "--fields",
+            "ts,close,vol",
             "--period-type",
             "month",
             "--period",
@@ -579,6 +589,35 @@ mod tests {
             "--extended-hours",
         ]);
         assert_eq!(cli.command_name(), "market.history");
+    }
+
+    #[test]
+    fn market_history_fields_parse_output_fields() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "market",
+            "history",
+            "AAPL",
+            "--fields",
+            "ts,close,vol",
+        ]);
+
+        let Command::Market(MarketCommand::History(args)) = cli.command else {
+            panic!("expected market history command");
+        };
+        assert_eq!(args.fields.as_deref(), Some("ts,close,vol"));
+        assert!(!args.all_fields);
+    }
+
+    #[test]
+    fn market_history_all_fields_parses() {
+        let cli = Cli::parse_from(["schwab-agent", "market", "history", "AAPL", "--all-fields"]);
+
+        let Command::Market(MarketCommand::History(args)) = cli.command else {
+            panic!("expected market history command");
+        };
+        assert!(args.all_fields);
+        assert!(args.fields.is_none());
     }
 
     #[test]

@@ -16,6 +16,12 @@ pub(crate) async fn handle(cli: &Cli, command: &MarketCommand) -> Result<Value, 
 
 /// Fetches price history candles for a single symbol and returns them as JSON.
 async fn history(cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
+    let selected_fields = if args.all_fields {
+        None
+    } else {
+        Some(selected_history_fields(args.fields.as_deref())?)
+    };
+
     let client = auth::provider(cli)?.client().await?;
     let mut options = PriceHistoryOptions::new();
     if let Some(period_type) = &args.period_type {
@@ -40,7 +46,152 @@ async fn history(cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
         options = options.bool_parameter("needExtendedHoursData", true);
     }
     let candle_list = client.get_price_history(&args.symbol, options).await?;
-    Ok(to_value(candle_list)?)
+    let value = to_value(candle_list)?;
+    if args.all_fields {
+        return Ok(value);
+    }
+
+    let fields =
+        selected_fields.expect("compact history fields are validated unless --all-fields is set");
+    Ok(to_value(select_history_fields(&value, &fields))?)
+}
+
+/// Default token-optimized candle fields for compact history row output.
+const DEFAULT_HISTORY_FIELDS: [&str; 6] = ["ts", "open", "high", "low", "close", "vol"];
+
+/// Parses the optional comma-separated history field list, or returns the compact default.
+fn selected_history_fields(requested: Option<&str>) -> Result<Vec<&'static str>, AppError> {
+    let Some(requested) = requested else {
+        return Ok(DEFAULT_HISTORY_FIELDS.to_vec());
+    };
+    let fields = requested
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .collect::<Vec<_>>();
+    if fields.is_empty() {
+        return Err(AppError::MarketValidation {
+            message: format!(
+                "history --fields cannot be empty; hint: available fields: {}",
+                available_history_fields().join(", ")
+            ),
+        });
+    }
+    validate_history_fields(&fields)?;
+    Ok(fields
+        .iter()
+        .map(|field| canonical_history_field(field))
+        .collect())
+}
+
+/// Validates user-requested history candle field names and aliases.
+fn validate_history_fields(requested: &[&str]) -> Result<(), AppError> {
+    let unknown = requested
+        .iter()
+        .filter(|field| canonical_history_field(field).is_empty())
+        .copied()
+        .collect::<Vec<_>>();
+
+    if unknown.is_empty() {
+        return Ok(());
+    }
+
+    Err(AppError::MarketValidation {
+        message: format!(
+            "unknown history field(s): {}; hint: available fields: {}",
+            unknown.join(", "),
+            available_history_fields().join(", ")
+        ),
+    })
+}
+
+/// Projects Schwab price-history candles into a compact table-shaped response.
+#[must_use]
+fn select_history_fields(history: &Value, fields: &[&str]) -> HistoryRowsOutput {
+    let rows = history
+        .get("candles")
+        .and_then(Value::as_array)
+        .map(|candles| {
+            candles
+                .iter()
+                .map(|candle| {
+                    fields
+                        .iter()
+                        .map(|field| selected_history_field_value(candle, field))
+                        .collect()
+                })
+                .collect::<Vec<Vec<Value>>>()
+        })
+        .unwrap_or_default();
+
+    HistoryRowsOutput {
+        symbol: history
+            .get("symbol")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        columns: fields.iter().map(|field| (*field).to_string()).collect(),
+        row_count: rows.len(),
+        rows,
+    }
+}
+
+/// Maps accepted history field aliases to their emitted compact column name.
+fn canonical_history_field(field: &str) -> &'static str {
+    match field {
+        "timestamp" | "datetime" | "time" | "ts" => "ts",
+        "datetime_iso8601" | "datetimeISO8601" | "iso8601" | "iso" => "iso",
+        "open" | "o" => "open",
+        "high" | "h" => "high",
+        "low" | "l" => "low",
+        "close" | "c" => "close",
+        "volume" | "vol" | "v" => "vol",
+        _ => "",
+    }
+}
+
+/// Returns every accepted history field name and alias for validation hints.
+fn available_history_fields() -> Vec<&'static str> {
+    let mut fields = [
+        "timestamp",
+        "datetime",
+        "time",
+        "ts",
+        "datetime_iso8601",
+        "datetimeISO8601",
+        "iso8601",
+        "iso",
+        "open",
+        "o",
+        "high",
+        "h",
+        "low",
+        "l",
+        "close",
+        "c",
+        "volume",
+        "vol",
+        "v",
+    ]
+    .to_vec();
+    fields.sort_unstable();
+    fields
+}
+
+/// Extracts a single selected history candle field as a JSON value.
+fn selected_history_field_value(candle: &Value, field: &str) -> Value {
+    match field {
+        "ts" => candle.get("datetime").cloned().unwrap_or(Value::Null),
+        "iso" => candle
+            .get("datetimeISO8601")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "open" => candle.get("open").cloned().unwrap_or(Value::Null),
+        "high" => candle.get("high").cloned().unwrap_or(Value::Null),
+        "low" => candle.get("low").cloned().unwrap_or(Value::Null),
+        "close" => candle.get("close").cloned().unwrap_or(Value::Null),
+        "vol" => candle.get("volume").cloned().unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
 }
 
 /// Fetches quotes for the requested symbols from the Schwab API and returns either
@@ -581,6 +732,21 @@ struct QuoteRowsOutput {
     /// Compact quote rows aligned with [`Self::columns`].
     rows: Vec<Vec<Value>>,
     /// Number of quote rows returned.
+    #[serde(rename = "rowCount")]
+    row_count: usize,
+}
+
+/// Token-optimized table-shaped JSON envelope returned by default for `market history`.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Serialize)]
+struct HistoryRowsOutput {
+    /// Symbol returned by Schwab for this candle series.
+    symbol: Option<String>,
+    /// Ordered column names for every row value.
+    columns: Vec<String>,
+    /// Compact candle rows aligned with [`Self::columns`].
+    rows: Vec<Vec<Value>>,
+    /// Number of candle rows returned.
     #[serde(rename = "rowCount")]
     row_count: usize,
 }

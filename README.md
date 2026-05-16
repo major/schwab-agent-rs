@@ -82,9 +82,13 @@ schwab-agent market quote AAPL MSFT
 schwab-agent market quote AAPL MSFT --fields sym,last,pct,vol
 schwab-agent market quote AAPL MSFT --all-fields
 schwab-agent market history SPY --period 10 --period-type day
+schwab-agent market history SPY --fields ts,close,vol
+schwab-agent market history SPY --all-fields
 ```
 
 `market quote` is token-optimized by default. It returns `columns`, `rows`, and `rowCount` with compact default columns: `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, `err`. The `req` and `err` columns make per-symbol Schwab quote errors visible without expanding to the full detailed output. Use `--fields` to select output columns. Accepted aliases include full names such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`, plus compact names such as `req`, `sym`, `chg`, `pct`, `vol`, and `err`. Use `--all-fields` to return the full detailed quote objects. Use `--api-fields quote,reference` only when you need to limit Schwab quote field groups requested from the API.
+
+`market history` is also token-optimized by default. It returns `symbol`, `columns`, `rows`, and `rowCount` with compact default candle columns: `ts`, `open`, `high`, `low`, `close`, `vol`. Use `--fields` to select candle columns. Accepted aliases include full names such as `timestamp`, `datetime`, `datetimeISO8601`, and `volume`, plus compact names such as `ts`, `iso`, `o`, `h`, `l`, `c`, and `vol`. Use `--all-fields` to return the full Schwab price history object, including fields such as `previousClose`, `previousCloseDate`, `previousCloseDateISO8601`, `empty`, and raw candle objects.
 
 ### account
 

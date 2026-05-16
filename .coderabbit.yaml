@@ -51,6 +51,7 @@ reviews:
         CLI binary review:
         - This is a CLI porcelain over the schwab crate, not a library
         - Commands should output structured JSON for agent consumption
+        - Market quote and history defaults should stay token-efficient with compact rows unless `--all-fields` is requested
         - Use clap derive macros for argument parsing
         - Errors should propagate via thiserror with clear messages
         - Keep account hashes, tokens, and credentials out of logs, errors, tests, and docs
