@@ -754,6 +754,143 @@ fn summarize_error_all_none() {
 // -- Quote output serialization: verifies compact and full-detail shapes --
 
 #[test]
+fn selected_history_fields_defaults_to_compact_columns() {
+    let fields = selected_history_fields(None).expect("default fields should be valid");
+
+    assert_eq!(fields, vec!["ts", "open", "high", "low", "close", "vol"]);
+}
+
+#[test]
+fn selected_history_fields_accepts_aliases() {
+    let fields = selected_history_fields(Some("datetime,o,h,l,c,volume,datetimeISO8601"))
+        .expect("known aliases should be valid");
+
+    assert_eq!(
+        fields,
+        vec!["ts", "open", "high", "low", "close", "vol", "iso"]
+    );
+}
+
+#[test]
+fn selected_history_fields_rejects_unknown_fields() {
+    let error = selected_history_fields(Some("close,nope"))
+        .expect_err("unknown field should fail validation");
+
+    assert!(matches!(error, AppError::MarketValidation { .. }));
+    assert!(error.to_string().contains("unknown history field(s): nope"));
+}
+
+#[test]
+fn selected_history_fields_rejects_empty_lists() {
+    let error =
+        selected_history_fields(Some(",, ")).expect_err("empty field list should fail validation");
+
+    assert!(matches!(error, AppError::MarketValidation { .. }));
+    assert!(
+        error
+            .to_string()
+            .contains("history --fields cannot be empty")
+    );
+}
+
+#[test]
+fn history_rows_output_serializes_compact_table() {
+    let history = serde_json::json!({
+        "symbol": "SPY",
+        "empty": false,
+        "previousClose": 650.0,
+        "candles": [
+            {
+                "datetime": 1_700_000_000_000_i64,
+                "open": 650.0,
+                "high": 651.5,
+                "low": 649.5,
+                "close": 651.0,
+                "volume": 12_345
+            }
+        ]
+    });
+
+    let fields = selected_history_fields(None).expect("default fields should be valid");
+    let output = select_history_fields(&history, &fields);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(json["symbol"], serde_json::json!("SPY"));
+    assert_eq!(
+        json["columns"],
+        serde_json::json!(["ts", "open", "high", "low", "close", "vol"])
+    );
+    assert_eq!(json["rowCount"], 1);
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([[1_700_000_000_000_i64, 650.0, 651.5, 649.5, 651.0, 12_345]])
+    );
+}
+
+#[test]
+fn history_rows_output_selects_extra_iso_field() {
+    let history = serde_json::json!({
+        "symbol": "SPY",
+        "candles": [
+            {
+                "datetime": 1_700_000_000_000_i64,
+                "datetimeISO8601": "2023-11-14T22:13:20Z",
+                "close": 651.0,
+                "volume": 12_345
+            }
+        ]
+    });
+
+    let fields = selected_history_fields(Some("timestamp,datetime_iso8601,close,volume"))
+        .expect("known aliases should be valid");
+    let output = select_history_fields(&history, &fields);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(
+        json["columns"],
+        serde_json::json!(["ts", "iso", "close", "vol"])
+    );
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([[1_700_000_000_000_i64, "2023-11-14T22:13:20Z", 651.0, 12_345]])
+    );
+}
+
+#[test]
+fn history_rows_output_includes_null_for_missing_selected_fields() {
+    let history = serde_json::json!({
+        "symbol": "SPY",
+        "candles": [{"datetime": 1_700_000_000_000_i64, "close": 651.0}]
+    });
+
+    let output = select_history_fields(&history, &["ts", "iso", "open", "close", "vol"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(
+        json["columns"],
+        serde_json::json!(["ts", "iso", "open", "close", "vol"])
+    );
+    assert_eq!(json["rowCount"], 1);
+    assert_eq!(
+        json["rows"],
+        serde_json::json!([[1_700_000_000_000_i64, null, null, 651.0, null]])
+    );
+}
+
+#[test]
+fn history_rows_output_handles_empty_candles() {
+    let history = serde_json::json!({"symbol": "SPY", "candles": []});
+
+    let output = select_history_fields(&history, &["ts", "close"]);
+    let json = serde_json::to_value(&output).unwrap();
+
+    assert_eq!(json["symbol"], serde_json::json!("SPY"));
+    assert_eq!(json["columns"], serde_json::json!(["ts", "close"]));
+    assert_eq!(json["rowCount"], 0);
+    assert_eq!(json["rows"], serde_json::json!([]));
+}
+
+#[test]
 fn selected_quote_fields_defaults_to_compact_columns() {
     let fields = selected_quote_fields(None).expect("default fields should be valid");
 
