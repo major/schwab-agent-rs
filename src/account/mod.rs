@@ -17,7 +17,13 @@ pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value,
     match command {
         AccountCommand::Summary(args) => {
             let token = provider.token().await?;
-            let data = run_summary(&client, &token, args.positions).await?;
+            let data = run_summary(
+                &client,
+                &token,
+                args.include_positions(),
+                args.with_positions_only,
+            )
+            .await?;
             Ok(to_value(data)?)
         }
         AccountCommand::Resolve(args) => {
@@ -130,6 +136,10 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 /// When `with_positions` is true, account data is fetched with position details
 /// included. Otherwise, positions are omitted from the output.
 ///
+/// When `with_positions_only` is true, accounts that have no positions are
+/// excluded from the result entirely. This implicitly enables position
+/// retrieval regardless of the `with_positions` value.
+///
 /// # Errors
 ///
 /// Returns an `AppError` when any Schwab API call fails.
@@ -137,7 +147,11 @@ pub async fn run_summary(
     client: &schwab::Client,
     bearer_token: &str,
     with_positions: bool,
+    with_positions_only: bool,
 ) -> Result<AccountSummaryData, AppError> {
+    // Filtering by positions requires fetching them.
+    let effective_positions = with_positions || with_positions_only;
+
     let hashes = client.get_account_numbers().await?;
     let preferences = client.get_user_preference().await?;
     let prefs: Vec<UserPreferenceAccount> = preferences
@@ -146,14 +160,15 @@ pub async fn run_summary(
         .flatten()
         .collect();
 
-    let fields = with_positions.then_some("positions");
+    let fields = effective_positions.then_some("positions");
     let accounts = crate::raw::fetch_accounts(bearer_token, fields).await?;
 
     Ok(render_summary_from_data(
         &accounts,
         &hashes,
         &prefs,
-        with_positions,
+        effective_positions,
+        with_positions_only,
     ))
 }
 
@@ -161,12 +176,16 @@ pub async fn run_summary(
 ///
 /// Joins accounts to hashes via `account_number`, enriches with user preferences,
 /// and extracts balance summaries based on account type (margin vs cash).
+///
+/// When `with_positions_only` is true, accounts whose `positions` field is
+/// `None` or an empty list are excluded from the output.
 #[must_use]
 pub(crate) fn render_summary_from_data(
     accounts: &[Account],
     hashes: &[AccountNumberHash],
     prefs: &[UserPreferenceAccount],
     with_positions: bool,
+    with_positions_only: bool,
 ) -> AccountSummaryData {
     let rows = accounts
         .iter()
@@ -180,6 +199,9 @@ pub(crate) fn render_summary_from_data(
                 balances,
                 positions,
             } = fields;
+            if with_positions_only && !has_positions(&positions) {
+                return None;
+            }
             let hash_value = find_hash_value(account_number.as_deref(), hashes)?;
             let pref = matching_preference(account_number.as_deref(), prefs);
             let mut row = build_account_row(hash_value, pref);
@@ -198,6 +220,12 @@ pub(crate) fn render_summary_from_data(
         .collect();
 
     AccountSummaryData { accounts: rows }
+}
+
+/// Returns `true` when positions contains at least one entry.
+#[must_use]
+fn has_positions(positions: &Option<Vec<Value>>) -> bool {
+    positions.as_ref().is_some_and(|p| !p.is_empty())
 }
 
 /// Extracts the account number, balance summary, and optional positions from an

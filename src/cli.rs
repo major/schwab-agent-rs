@@ -478,6 +478,20 @@ pub struct AccountSummaryArgs {
     /// Include individual positions in each account summary.
     #[arg(long)]
     pub positions: bool,
+
+    /// Only include accounts that hold at least one position (implies --positions).
+    #[arg(long)]
+    pub with_positions_only: bool,
+}
+
+impl AccountSummaryArgs {
+    /// Whether position data should be fetched from the API.
+    ///
+    /// Returns `true` when either `--positions` or `--with-positions-only` is set.
+    #[must_use]
+    pub fn include_positions(&self) -> bool {
+        self.positions || self.with_positions_only
+    }
 }
 
 /// Arguments for `account resolve`.
@@ -726,6 +740,36 @@ mod tests {
             panic!("expected account summary command");
         };
         assert!(args.positions);
+        assert!(!args.with_positions_only);
+        assert!(args.include_positions());
+    }
+
+    #[test]
+    fn parse_account_summary_with_positions_only() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "account",
+            "summary",
+            "--with-positions-only",
+        ]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(!args.positions);
+        assert!(args.with_positions_only);
+        // --with-positions-only implies --positions
+        assert!(args.include_positions());
+    }
+
+    #[test]
+    fn parse_account_summary_no_flags_include_positions_false() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "summary"]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(!args.include_positions());
     }
 
     #[test]
