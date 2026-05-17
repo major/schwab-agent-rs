@@ -13,6 +13,10 @@ export SCHWAB_CLIENT_SECRET="..."
 # Callback URL defaults to https://127.0.0.1:8182
 ```
 
+## Release Notes
+
+This crate is published as `schwab-agent-rs`. Releases are handled by the manual `release-plz` GitHub Actions workflow after the first manual crates.io publish. The workflow creates release PRs from Conventional Commits and, after the release PR lands, publishes with crates.io Trusted Publishing via GitHub Actions OIDC.
+
 ## Mutable Operation Guard
 
 All mutable commands (place, place-from-preview, place-raw, replace, cancel) require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, list, get) are not gated.

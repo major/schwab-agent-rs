@@ -1,6 +1,5 @@
 [workspace]
-git_only = true
-semver_check = false
+semver_check = true
 changelog_update = true
 git_release_enable = true
 git_tag_enable = true

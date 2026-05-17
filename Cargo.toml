@@ -5,7 +5,12 @@ edition = "2024"
 rust-version = "1.95"
 description = "Agent-oriented JSON CLI porcelain for schwab-rs"
 license = "MIT"
-publish = false
+repository = "https://github.com/major/schwab-agent-rs"
+readme = "README.md"
+
+[[bin]]
+name = "schwab-agent"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5.51", features = ["derive", "env"] }

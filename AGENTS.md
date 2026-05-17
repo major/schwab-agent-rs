@@ -7,7 +7,7 @@
 Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is resolved from crates.io for CI compatibility.
 
 - Edition 2024, MSRV 1.95
-- `publish = false` (private crate)
+- Published crate once manually, then released through `release-plz` with crates.io Trusted Publishing
 - Feature flag: `decimal` (enables `schwab/decimal`) - enabled by default
 
 ## Source Layout
@@ -228,6 +228,50 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 - `cargo audit` on push/PR when Cargo files change, plus daily cron
 
+### release-plz.yml
+
+Release automation follows the same strategy as `schwab-rs`: `release-plz` runs on manual `workflow_dispatch` only. Two independent jobs are defined:
+
+- `release-pr`: opens or updates a release PR with the version bump, `Cargo.lock` update, and `CHANGELOG.md` entries from Conventional Commits
+- `release`: publishes to crates.io, creates the git tag, and creates the GitHub release after a version bump lands on `main`
+
+The workflow uses crates.io Trusted Publishing with GitHub Actions OIDC (`id-token: write`) instead of `CARGO_REGISTRY_TOKEN`. Configure the crates.io Trusted Publisher for workflow filename `release-plz.yml` after the first manual crate publish succeeds. crates.io requires the first release of a brand-new crate to be published manually with a token that has `publish-new` scope before Trusted Publishing can be enabled.
+
+The `release-pr` job uses the `RELEASE_PLZ_TOKEN` repository secret instead of the default `GITHUB_TOKEN` so release PR branch pushes trigger normal CI workflows. The `release` job can keep using `GITHUB_TOKEN` because publishing is authorized by crates.io Trusted Publishing and the job does not need to trigger another workflow.
+
+Configuration lives in `release-plz.toml` and enables semver checking, changelog updates, git tags, and GitHub releases.
+
+#### Release Workflow
+
+Manual trigger flow (Actions > Release-plz > Run workflow):
+
+1. Push commits to `main` using Conventional Commits (`feat:`, `fix:`, etc.)
+2. When ready to release, trigger the workflow manually from GitHub Actions
+3. `release-pr` opens a PR with the version bump, `Cargo.lock` update, and `CHANGELOG.md` entries
+4. Review and merge the release PR
+5. Trigger the workflow again to publish
+6. `release` detects the version bump, runs `cargo publish`, creates the git tag, and creates the GitHub release
+7. Verify at `https://crates.io/crates/schwab-agent-rs`
+
+#### First Manual Publish
+
+Trusted Publishing cannot be configured for a brand-new crate until the crate exists on crates.io. For the first release only:
+
+1. Ensure `cargo publish --dry-run` succeeds locally
+2. Publish manually with a crates.io token that has `publish-new` scope
+3. Configure crates.io Trusted Publishing for this repository and workflow filename `release-plz.yml`
+4. Use the manual `release-plz` workflow for later releases
+
+#### Manual Release Fallback
+
+If `release-pr` is unavailable, version bumps can be done manually:
+
+1. Bump `version` in `Cargo.toml`
+2. Run `cargo update --workspace` to sync `Cargo.lock`
+3. Commit both `Cargo.toml` and `Cargo.lock` together (dirty `Cargo.lock` causes `cargo publish` to fail)
+4. Push to `main`
+5. Trigger the release-plz workflow manually, or run `cargo publish` locally
+
 ## Security
 
 Keep account hashes, tokens, and credentials out of logs, errors, tests, and docs. The preview system uses cryptographic digests specifically to avoid storing sensitive order data in plaintext.
@@ -237,6 +281,7 @@ Keep account hashes, tokens, and credentials out of logs, errors, tests, and doc
 - **CodeRabbit** (`.coderabbit.yaml`): auto-review disabled (manual trigger via `@coderabbitai review`). References `**/AGENTS.md` as code guideline source.
 - **Renovate**: weekly Monday dep updates, auto-merge patch/minor after 7 days.
 - **nextest** (`.config/nextest.toml`): retry and timeout configuration.
+- **release-plz** (`release-plz.toml`, `.github/workflows/release-plz.yml`): manual-only release PR and publish workflow with crates.io Trusted Publishing.
 
 ## Files to Keep Updated
 
@@ -245,4 +290,7 @@ When the project changes (new commands, strategies, args, error codes, CI config
 - **`README.md`** - project overview and usage for GitHub
 - **`AGENTS.md`** - this file
 - **`SKILL.md`** - LLM-facing CLI usage guide
+- **`release-plz.toml`** - release-plz configuration (semver check, changelog, git tags, GitHub releases)
+- **`.github/workflows/release-plz.yml`** - manual release PR and publish workflow
+- **`.github/instructions/*.instructions.md`** - review instructions for workflow-specific policies
 - **`.coderabbit.yaml`** - path instructions and review guidelines
