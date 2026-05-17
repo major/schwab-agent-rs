@@ -6,6 +6,10 @@
 
 Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-oriented structured JSON output for Charles Schwab API workflows. Not a library - it's a CLI porcelain. The `schwab` crate is resolved from crates.io for CI compatibility.
 
+### Architecture Boundary: schwab-rs vs schwab-agent-rs
+
+`schwab-rs` is a low-level API crate with nearly zero data processing. It handles auth, HTTP transport, and typed deserialization of Schwab API responses, but does NOT sanitize, transform, or work around API quirks. All data munging, response normalization, and workaround logic belongs in `schwab-agent-rs`. When the Schwab API returns unexpected formats (e.g., object-wrapped arrays, boolean `false` in numeric fields), the fix goes here in schwab-agent-rs using raw request methods from schwab-rs, not in schwab-rs itself.
+
 - Edition 2024, MSRV 1.95
 - Published crate once manually, then released through `release-plz` with crates.io Trusted Publishing
 - Feature flag: `decimal` (enables `schwab/decimal`) - enabled by default
