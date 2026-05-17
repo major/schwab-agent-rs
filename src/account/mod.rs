@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::{Value, to_value};
+use serde_json::{Value, json, to_value};
 
 use schwab::{
     Account, AccountNumberHash, AccountsInstrument, CashBalance, MarginBalance, SecuritiesAccount,
@@ -10,23 +10,35 @@ use crate::auth;
 use crate::cli::{AccountCommand, Cli};
 use crate::error::AppError;
 
+/// Default position fields for row-based output.
+const DEFAULT_POSITION_FIELDS: [&str; 6] = ["sym", "long_qty", "avg", "mktval", "pnl", "pnlpct"];
+
 /// Dispatches an account subcommand and returns its JSON value.
 pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value, AppError> {
-    let provider = auth::provider(cli)?;
-    let client = provider.client().await?;
     match command {
         AccountCommand::Summary(args) => {
+            // Validate fields before auth to fail fast on bad input.
+            let position_fields = if args.all_fields {
+                None
+            } else {
+                Some(selected_position_fields(args.fields.as_deref())?)
+            };
+            let provider = auth::provider(cli)?;
+            let client = provider.client().await?;
             let token = provider.token().await?;
             let data = run_summary(
                 &client,
                 &token,
                 args.include_positions(),
                 args.with_positions_only,
+                position_fields.as_deref(),
             )
             .await?;
             Ok(to_value(data)?)
         }
         AccountCommand::Resolve(args) => {
+            let provider = auth::provider(cli)?;
+            let client = provider.client().await?;
             let data = resolve_account(&client, &args.selector).await?;
             Ok(to_value(data)?)
         }
@@ -45,7 +57,7 @@ pub struct AccountRow {
     pub is_closing_only_restricted: Option<bool>,
     pub is_day_trader: Option<bool>,
     pub balances: Option<AccountBalances>,
-    pub positions: Option<Vec<Value>>,
+    pub positions: Option<Value>,
 }
 
 /// Account balance summary, tagged by account kind.
@@ -91,7 +103,7 @@ struct AccountFields {
     is_closing_only_restricted: Option<bool>,
     is_day_trader: Option<bool>,
     balances: Option<AccountBalances>,
-    positions: Option<Vec<Value>>,
+    positions: Option<Value>,
 }
 
 /// Account resolution payload.
@@ -148,6 +160,7 @@ pub async fn run_summary(
     bearer_token: &str,
     with_positions: bool,
     with_positions_only: bool,
+    position_fields: Option<&[&str]>,
 ) -> Result<AccountSummaryData, AppError> {
     // Filtering by positions requires fetching them.
     let effective_positions = with_positions || with_positions_only;
@@ -169,6 +182,7 @@ pub async fn run_summary(
         &prefs,
         effective_positions,
         with_positions_only,
+        position_fields,
     ))
 }
 
@@ -178,7 +192,11 @@ pub async fn run_summary(
 /// and extracts balance summaries based on account type (margin vs cash).
 ///
 /// When `with_positions_only` is true, accounts whose `positions` field is
-/// `None` or an empty list are excluded from the output.
+/// `None`, an empty array, or a row-based object with zero rows are excluded
+/// from the output.
+///
+/// When `position_fields` is `Some`, positions use row-based output with the
+/// given field selection. When `None`, positions use full compact objects.
 #[must_use]
 pub(crate) fn render_summary_from_data(
     accounts: &[Account],
@@ -186,11 +204,12 @@ pub(crate) fn render_summary_from_data(
     prefs: &[UserPreferenceAccount],
     with_positions: bool,
     with_positions_only: bool,
+    position_fields: Option<&[&str]>,
 ) -> AccountSummaryData {
     let rows = accounts
         .iter()
         .filter_map(|account| {
-            let fields = extract_account_fields(account, with_positions)?;
+            let fields = extract_account_fields(account, with_positions, position_fields)?;
             let AccountFields {
                 account_number,
                 variant_type,
@@ -223,17 +242,34 @@ pub(crate) fn render_summary_from_data(
 }
 
 /// Returns `true` when positions contains at least one entry.
+///
+/// Handles both row-based (`{rows: [...]}`) and array-based (`[...]`) formats.
 #[must_use]
-fn has_positions(positions: &Option<Vec<Value>>) -> bool {
-    positions.as_ref().is_some_and(|p| !p.is_empty())
+fn has_positions(positions: &Option<Value>) -> bool {
+    positions.as_ref().is_some_and(|v| match v {
+        Value::Array(arr) => !arr.is_empty(),
+        Value::Object(obj) => obj
+            .get("rows")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| !rows.is_empty()),
+        _ => false,
+    })
 }
 
 /// Extracts the account number, balance summary, and optional positions from an
 /// [`Account`] by dispatching on the securities account variant.
 ///
+/// When `position_fields` is `Some`, positions are formatted as row-based output
+/// using [`select_position_fields`]. When `None`, positions use full compact
+/// objects via [`compact_position`].
+///
 /// Returns `None` when the account has no `securities_account` field.
 #[must_use]
-fn extract_account_fields(account: &Account, with_positions: bool) -> Option<AccountFields> {
+fn extract_account_fields(
+    account: &Account,
+    with_positions: bool,
+    position_fields: Option<&[&str]>,
+) -> Option<AccountFields> {
     match account.securities_account.as_ref()? {
         SecuritiesAccount::Margin(margin) => {
             let balances = margin
@@ -241,7 +277,7 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
                 .as_ref()
                 .map(|b| AccountBalances::Margin(margin_balance_summary(b)));
             let positions = with_positions
-                .then(|| compact_positions(&margin.positions))
+                .then(|| format_positions(&margin.positions, position_fields))
                 .flatten();
             Some(AccountFields {
                 account_number: margin.account_number.clone(),
@@ -258,7 +294,7 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
                 .as_ref()
                 .map(|b| AccountBalances::Cash(cash_balance_summary(b)));
             let positions = with_positions
-                .then(|| compact_positions(&cash.positions))
+                .then(|| format_positions(&cash.positions, position_fields))
                 .flatten();
             Some(AccountFields {
                 account_number: cash.account_number.clone(),
@@ -295,15 +331,79 @@ fn cash_balance_summary(balance: &CashBalance) -> CashBalanceSummary {
     }
 }
 
-/// Converts positions into compact JSON values with only essential fields.
+/// Formats positions using either row-based or compact object output.
+///
+/// When `position_fields` is `Some`, returns row-based output with `columns`,
+/// `rows`, and `rowCount`. When `None`, returns an array of compact objects.
 ///
 /// Returns `None` when positions are absent, preserving the distinction between
 /// "not requested" and "empty list".
 #[must_use]
-fn compact_positions(positions: &Option<Vec<schwab::Position>>) -> Option<Vec<Value>> {
-    positions
-        .as_ref()
-        .map(|pos| pos.iter().map(compact_position).collect())
+fn format_positions(
+    positions: &Option<Vec<schwab::Position>>,
+    position_fields: Option<&[&str]>,
+) -> Option<Value> {
+    let pos = positions.as_ref()?;
+    match position_fields {
+        Some(fields) => Some(select_position_fields(pos, fields)),
+        None => Some(Value::Array(pos.iter().map(compact_position).collect())),
+    }
+}
+
+/// Builds row-based position output with `columns`, `rows`, and `rowCount`.
+#[must_use]
+fn select_position_fields(positions: &[schwab::Position], fields: &[&str]) -> Value {
+    let columns: Vec<Value> = fields.iter().map(|f| json!(*f)).collect();
+    let rows: Vec<Value> = positions
+        .iter()
+        .map(|pos| {
+            let instrument = pos.instrument.as_ref().map(instrument_summary);
+            let row: Vec<Value> = fields
+                .iter()
+                .map(|f| position_field_value(pos, instrument.as_ref(), f))
+                .collect();
+            Value::Array(row)
+        })
+        .collect();
+    json!({
+        "columns": columns,
+        "rows": rows,
+        "rowCount": rows.len(),
+    })
+}
+
+/// Extracts a single field value from a position by canonical field name.
+///
+/// The caller precomputes `instrument` once per position so it is reused
+/// across all fields in the row.
+#[must_use]
+fn position_field_value(
+    position: &schwab::Position,
+    instrument: Option<&InstrumentSummary>,
+    field: &str,
+) -> Value {
+    match field {
+        "sym" => instrument
+            .and_then(|i| i.symbol.as_deref())
+            .map_or(Value::Null, |s| json!(s)),
+        "desc" => instrument
+            .and_then(|i| i.description.as_deref())
+            .map_or(Value::Null, |s| json!(s)),
+        "type" => instrument
+            .and_then(|i| i.asset_type.as_deref())
+            .map_or(Value::Null, |s| json!(s)),
+        "long_qty" => position.long_quantity.map_or(Value::Null, |v| json!(v)),
+        "short_qty" => position.short_quantity.map_or(Value::Null, |v| json!(v)),
+        "avg" => position.average_price.map_or(Value::Null, |v| json!(v)),
+        "mktval" => position.market_value.map_or(Value::Null, |v| json!(v)),
+        "pnl" => position
+            .current_day_profit_loss
+            .map_or(Value::Null, |v| json!(v)),
+        "pnlpct" => position
+            .current_day_profit_loss_percentage
+            .map_or(Value::Null, |v| json!(v)),
+        _ => Value::Null,
+    }
 }
 
 /// Builds a compact JSON value from a single position, including only fields
@@ -350,6 +450,103 @@ fn compact_position(position: &schwab::Position) -> Value {
     }
 
     Value::Object(map)
+}
+
+/// Parses and validates a comma-separated field list for position output.
+///
+/// Returns canonical field names. When `requested` is `None`, returns the
+/// default field set.
+///
+/// # Errors
+///
+/// Returns `AppError::AccountValidation` when any field name is unrecognized
+/// or the list is empty.
+pub(crate) fn selected_position_fields(
+    requested: Option<&str>,
+) -> Result<Vec<&'static str>, AppError> {
+    let Some(input) = requested else {
+        return Ok(DEFAULT_POSITION_FIELDS.to_vec());
+    };
+
+    let fields: Vec<&str> = input.split(',').map(str::trim).collect();
+    if fields.is_empty() || fields.iter().all(|f| f.is_empty()) {
+        return Err(AppError::AccountValidation(
+            "empty field list; omit --fields to use defaults".to_string(),
+        ));
+    }
+
+    validate_position_fields(&fields)?;
+
+    Ok(fields
+        .into_iter()
+        .filter(|f| !f.is_empty())
+        .filter_map(|f| canonical_position_field(f))
+        .collect())
+}
+
+/// Validates that all requested fields are recognized position field names.
+fn validate_position_fields(fields: &[&str]) -> Result<(), AppError> {
+    let unknown: Vec<&str> = fields
+        .iter()
+        .filter(|f| !f.is_empty())
+        .filter(|f| canonical_position_field(f).is_none())
+        .copied()
+        .collect();
+
+    if unknown.is_empty() {
+        Ok(())
+    } else {
+        let available = available_position_fields();
+        Err(AppError::AccountValidation(format!(
+            "unknown position field(s): {}; available: {}",
+            unknown.join(", "),
+            available.join(", ")
+        )))
+    }
+}
+
+/// Maps a field name or alias to its canonical short name.
+#[must_use]
+pub(crate) fn canonical_position_field(name: &str) -> Option<&'static str> {
+    match name {
+        "sym" | "symbol" => Some("sym"),
+        "desc" | "description" => Some("desc"),
+        "type" | "asset_type" => Some("type"),
+        "long_qty" | "long_quantity" => Some("long_qty"),
+        "short_qty" | "short_quantity" => Some("short_qty"),
+        "avg" | "average_price" => Some("avg"),
+        "mktval" | "market_value" => Some("mktval"),
+        "pnl" | "current_day_profit_loss" => Some("pnl"),
+        "pnlpct" | "current_day_profit_loss_percentage" => Some("pnlpct"),
+        _ => None,
+    }
+}
+
+/// Returns a sorted list of all accepted position field aliases.
+#[must_use]
+pub(crate) fn available_position_fields() -> Vec<&'static str> {
+    let mut fields = vec![
+        "sym",
+        "symbol",
+        "desc",
+        "description",
+        "type",
+        "asset_type",
+        "long_qty",
+        "long_quantity",
+        "short_qty",
+        "short_quantity",
+        "avg",
+        "average_price",
+        "mktval",
+        "market_value",
+        "pnl",
+        "current_day_profit_loss",
+        "pnlpct",
+        "current_day_profit_loss_percentage",
+    ];
+    fields.sort_unstable();
+    fields
 }
 
 struct InstrumentSummary {

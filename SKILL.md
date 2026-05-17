@@ -58,12 +58,16 @@ Discover and resolve accounts before placing orders.
 Recommended workflow: `account summary` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
 
 ```bash
-schwab-agent account summary                       # list accounts with balances
-schwab-agent account summary --positions           # include current holdings
-schwab-agent account summary --with-positions-only # only accounts that hold positions
-schwab-agent account resolve Trading               # resolve nickname to canonical hash
-schwab-agent account resolve ABCDEF1234567890     # verify a known hash
+schwab-agent account summary                                    # list accounts with balances
+schwab-agent account summary --positions                        # include holdings (default compact columns)
+schwab-agent account summary --positions --fields sym,mktval,pnl  # select position columns
+schwab-agent account summary --positions --all-fields           # all 9 curated position fields as objects
+schwab-agent account summary --with-positions-only              # only accounts that hold positions
+schwab-agent account resolve Trading                            # resolve nickname to canonical hash
+schwab-agent account resolve ABCDEF1234567890                   # verify a known hash
 ```
+
+Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` for curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
 
 The `--account` flag on stock and order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
 
@@ -510,6 +514,7 @@ On error (non-zero exit code), read `hint` for recovery steps. Check `retryable`
 | `auth.required` | Auth needed | Run full auth flow |
 | `schwab.http_status` | API HTTP error | Check message for status code |
 | `input.empty_symbols` | No symbols given | Provide at least one symbol |
+| `account.validation_failed` | Account input validation error | Read the error message and hint for details (invalid `--fields`, unknown account selector, ambiguous nickname) |
 | `market.validation_failed` | Invalid market-data params | Use a listed `--fields` value or read the error hint |
 | `order.validation_failed` | Bad order params | Check strike/expiration values |
 | `order.preview_failed` | Preview issue | Re-run preview (may have expired) |
