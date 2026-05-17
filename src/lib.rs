@@ -12,6 +12,7 @@ mod options;
 mod order;
 mod output;
 mod portfolio;
+mod raw;
 mod shared;
 mod ta;
 mod verify;

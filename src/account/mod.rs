@@ -12,10 +12,12 @@ use crate::error::AppError;
 
 /// Dispatches an account subcommand and returns its JSON value.
 pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
     match command {
         AccountCommand::Summary(args) => {
-            let data = run_summary(&client, args.positions).await?;
+            let token = provider.token().await?;
+            let data = run_summary(&client, &token, args.positions).await?;
             Ok(to_value(data)?)
         }
         AccountCommand::Resolve(args) => {
@@ -113,6 +115,9 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 /// Fetches accounts, account hashes, and user preferences, then renders compact
 /// account rows with balance summaries.
 ///
+/// Uses a raw HTTP request to normalize Schwab API quirks (object-wrapped
+/// arrays, boolean `false` in numeric fields) before deserialization.
+///
 /// When `with_positions` is true, account data is fetched with position details
 /// included. Otherwise, positions are omitted from the output.
 ///
@@ -121,6 +126,7 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 /// Returns an `AppError` when any Schwab API call fails.
 pub async fn run_summary(
     client: &schwab::Client,
+    bearer_token: &str,
     with_positions: bool,
 ) -> Result<AccountSummaryData, AppError> {
     let hashes = client.get_account_numbers().await?;
@@ -132,7 +138,7 @@ pub async fn run_summary(
         .collect();
 
     let fields = with_positions.then_some("positions");
-    let accounts = client.get_accounts(fields).await?;
+    let accounts = crate::raw::fetch_accounts(bearer_token, fields).await?;
 
     Ok(render_summary_from_data(
         &accounts,
