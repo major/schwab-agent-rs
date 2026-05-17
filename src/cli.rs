@@ -482,6 +482,14 @@ pub struct AccountSummaryArgs {
     /// Only include accounts that hold at least one position (implies --positions).
     #[arg(long)]
     pub with_positions_only: bool,
+
+    /// Comma-separated list of position fields to include (row-based output).
+    #[arg(long, conflicts_with = "all_fields", requires = "positions")]
+    pub fields: Option<String>,
+
+    /// Return all position fields as full compact objects instead of row-based output.
+    #[arg(long, conflicts_with = "fields", requires = "positions")]
+    pub all_fields: bool,
 }
 
 impl AccountSummaryArgs {
@@ -741,7 +749,72 @@ mod tests {
         };
         assert!(args.positions);
         assert!(!args.with_positions_only);
+        assert!(args.fields.is_none());
+        assert!(!args.all_fields);
         assert!(args.include_positions());
+    }
+
+    #[test]
+    fn parse_account_summary_positions_with_fields() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "account",
+            "summary",
+            "--positions",
+            "--fields",
+            "sym,mktval,pnl",
+        ]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(args.positions);
+        assert_eq!(args.fields.as_deref(), Some("sym,mktval,pnl"));
+        assert!(!args.all_fields);
+    }
+
+    #[test]
+    fn parse_account_summary_positions_all_fields() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "account",
+            "summary",
+            "--positions",
+            "--all-fields",
+        ]);
+
+        let Command::Account(AccountCommand::Summary(args)) = cli.command else {
+            panic!("expected account summary command");
+        };
+        assert!(args.positions);
+        assert!(args.all_fields);
+        assert!(args.fields.is_none());
+    }
+
+    #[test]
+    fn parse_account_summary_fields_conflicts_with_all_fields() {
+        let result = Cli::try_parse_from([
+            "schwab-agent",
+            "account",
+            "summary",
+            "--positions",
+            "--fields",
+            "sym",
+            "--all-fields",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_account_summary_fields_requires_positions() {
+        let result = Cli::try_parse_from(["schwab-agent", "account", "summary", "--fields", "sym"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_account_summary_all_fields_requires_positions() {
+        let result = Cli::try_parse_from(["schwab-agent", "account", "summary", "--all-fields"]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -98,11 +98,15 @@ Account discovery, balances, positions, and resolution for LLM agents: `summary`
 Use `account summary` to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands.
 
 ```bash
-schwab-agent account summary                       # list all accounts with balances
-schwab-agent account summary --positions           # include holdings
-schwab-agent account summary --with-positions-only # only accounts that hold positions
-schwab-agent account resolve Trading               # resolve nickname to canonical hash
+schwab-agent account summary                                    # list all accounts with balances
+schwab-agent account summary --positions                        # include holdings (default compact columns)
+schwab-agent account summary --positions --fields sym,mktval,pnl  # select position columns
+schwab-agent account summary --positions --all-fields           # all 9 curated position fields as objects
+schwab-agent account summary --with-positions-only              # only accounts that hold positions
+schwab-agent account resolve Trading                            # resolve nickname to canonical hash
 ```
+
+Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
 
 
 ### stock

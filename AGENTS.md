@@ -73,7 +73,7 @@ src/
 
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
-- **account** - Account discovery, balances, positions, and resolution (summary, resolve)
+- **account** - Account discovery, balances, positions (with field selection), and resolution (summary, resolve)
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
 - **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
 - **option** - Option chain data (expirations, chain, screen, contract)
@@ -136,6 +136,10 @@ expirations, chain, screen, contract
 
 Row-based output (columns + rows arrays) for expirations, chain, and screen. Flat object output for contract. All include underlying symbol context.
 
+### Account Position Output
+
+`account summary --positions` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
+
 ### Market Quote and History Output
 
 `market quote` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount`. Default columns are `req`, `sym`, `bid`, `ask`, `last`, `mark`, `chg`, `pct`, `vol`, and `err` so per-symbol quote errors stay visible in compact output. Use `--fields` to select output columns by compact names or full aliases such as `requested_symbol`, `symbol`, `net_change`, `net_percent_change`, `volume`, and `error`. Use `--all-fields` to return full detailed quote objects. Use `--api-fields quote,reference` to limit Schwab quote field groups requested from the API.
@@ -158,7 +162,7 @@ Commands output raw JSON data payloads directly (no wrapper). Errors output an `
 
 - 3 = auth errors
 - 4 = HTTP status errors
-- 10 = input/validation/config errors (includes market.validation_failed, ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
+- 10 = input/validation/config errors (includes account.validation_failed, market.validation_failed, ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
 - 11 = preview errors
 - 20 = IO/JSON/config errors (includes ta.calculation_error)
 
