@@ -232,7 +232,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 Release automation uses three chained components triggered by git events:
 
-1. **git-cliff** (`cliff.toml`) - Generates changelogs from Conventional Commits with emoji-prefixed groups (Features, Bug Fixes, Documentation, etc.). Skips `chore: release`, `chore(deps)`, `chore(pr)`, `chore(pull)` commits.
+1. **git-cliff** (`cliff.toml` for CLI, `[changelog]` in `release-plz.toml` for CI) - Generates changelogs from Conventional Commits with emoji-prefixed groups (Features, Bug Fixes, Documentation, etc.). Skips `chore: release`, `chore(deps)`, `chore(pr)`, `chore(pull)` commits. The `[changelog]` section in `release-plz.toml` is the authoritative config for release PRs; `cliff.toml` is for standalone `git-cliff` CLI use only.
 2. **release-plz** (`cd.yml` + `release-plz.toml`) - Runs on push to main. A single job runs `release-plz/action` without a specific command, so it handles both release-pr and release in one run. Creates/updates a release PR, and when a version bump lands on main, publishes to crates.io and creates a git tag. Uses crates.io Trusted Publishing (OIDC with `id-token: write`), no `CARGO_REGISTRY_TOKEN`. `git_release_enable = false` because cargo-dist creates GitHub Releases.
 3. **cargo-dist** (`release.yml` + `dist-workspace.toml`) - Triggered by tag push matching `**[0-9]+.[0-9]+.[0-9]+*`. Builds cross-platform binaries for x86_64 Linux, x86_64/aarch64 macOS, x86_64 Windows. Generates shell and PowerShell installers. Creates the GitHub Release with all artifacts.
 
@@ -279,8 +279,8 @@ Keep account hashes, tokens, and credentials out of logs, errors, tests, and doc
 - **CodeRabbit** (`.coderabbit.yaml`): auto-review disabled (manual trigger via `@coderabbitai review`). References `**/AGENTS.md` as code guideline source.
 - **Renovate**: weekly Monday dep updates, auto-merge patch/minor after 7 days.
 - **nextest** (`.config/nextest.toml`): retry and timeout configuration.
-- **git-cliff** (`cliff.toml`): changelog generation from Conventional Commits with emoji-prefixed groups.
-- **release-plz** (`release-plz.toml`, `.github/workflows/cd.yml`): push-to-main release PR and publish workflow with crates.io Trusted Publishing.
+- **git-cliff** (`cliff.toml` for CLI, `[changelog]` in `release-plz.toml` for CI): changelog generation from Conventional Commits with emoji-prefixed groups.
+- **release-plz** (`release-plz.toml`, `.github/workflows/cd.yml`): push-to-main release PR and publish workflow with crates.io Trusted Publishing. Changelog config is inline in the `[changelog]` section (not via deprecated `changelog_config` file reference).
 - **cargo-dist** (`dist-workspace.toml`, `.github/workflows/release.yml`): tag-triggered cross-platform binary builds and GitHub Releases. `release.yml` is auto-generated; run `dist generate --ci github` to regenerate.
 
 ## Files to Keep Updated
