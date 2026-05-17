@@ -26,10 +26,19 @@
     {
       "description": "Group Rust CI action updates",
       "matchPackageNames": [
-        "dtolnay/rust-toolchain",
         "Swatinem/rust-cache"
       ],
       "groupName": "Rust CI actions"
+    },
+    {
+      "description": "Disable digest updates for dtolnay/rust-toolchain (uses branch names, not tags)",
+      "matchPackageNames": [
+        "dtolnay/rust-toolchain"
+      ],
+      "matchUpdateTypes": [
+        "digest"
+      ],
+      "enabled": false
     }
   ],
   "schedule": [
