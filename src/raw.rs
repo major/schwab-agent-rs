@@ -80,18 +80,23 @@ fn unwrap_accounts_array(value: Value) -> Value {
     }
 }
 
-/// Recursively replaces `false` with `null` throughout a JSON value tree.
+/// Known boolean field names in the Schwab API response (camelCase).
+///
+/// These keys carry legitimate `false` values and must not be converted to
+/// `null` during normalization.
+const BOOLEAN_FIELDS: &[&str] = &["isDayTrader", "isClosingOnlyRestricted"];
+
+/// Recursively replaces `false` with `null` throughout a JSON value tree,
+/// except for keys listed in [`BOOLEAN_FIELDS`].
 ///
 /// The Schwab API sometimes serializes absent or zero numeric fields as boolean
 /// `false` instead of `null` or `0`. Since the `schwab` crate types use
 /// `Option<Number>` for these fields, `false` causes a deserialization error.
 ///
-/// Replacing all `false` values with `null` also affects legitimate boolean
-/// fields (e.g., `is_day_trader`, `is_closing_only_restricted`), turning
-/// `Some(false)` into `None`. This is an acceptable trade-off because `None`
-/// carries the same practical meaning as `false` for these account flags.
+/// Known boolean fields are preserved so that `false` deserializes as
+/// `Some(false)` rather than collapsing to `None`.
 ///
-/// Boolean `true` values are preserved unchanged.
+/// Boolean `true` values are always preserved unchanged.
 #[must_use]
 fn normalize_false_to_null(value: Value) -> Value {
     match value {
@@ -101,7 +106,13 @@ fn normalize_false_to_null(value: Value) -> Value {
         }
         Value::Object(map) => Value::Object(
             map.into_iter()
-                .map(|(k, v)| (k, normalize_false_to_null(v)))
+                .map(|(k, v)| {
+                    if BOOLEAN_FIELDS.contains(&k.as_str()) {
+                        (k, v)
+                    } else {
+                        (k, normalize_false_to_null(v))
+                    }
+                })
                 .collect(),
         ),
         other => other,
@@ -168,8 +179,25 @@ mod tests {
 
     #[test]
     fn normalize_preserves_true_in_object() {
-        let input = json!({"is_day_trader": true, "balance": false});
-        let expected = json!({"is_day_trader": true, "balance": null});
+        let input = json!({"isDayTrader": true, "balance": false});
+        let expected = json!({"isDayTrader": true, "balance": null});
+        assert_eq!(normalize_false_to_null(input), expected);
+    }
+
+    #[test]
+    fn normalize_preserves_false_for_known_boolean_fields() {
+        let input = json!({
+            "isDayTrader": false,
+            "isClosingOnlyRestricted": false,
+            "balance": false,
+            "equity": false
+        });
+        let expected = json!({
+            "isDayTrader": false,
+            "isClosingOnlyRestricted": false,
+            "balance": null,
+            "equity": null
+        });
         assert_eq!(normalize_false_to_null(input), expected);
     }
 
@@ -214,7 +242,8 @@ mod tests {
             "accounts": [{
                 "securitiesAccount": {
                     "balance": false,
-                    "is_active": true,
+                    "isDayTrader": false,
+                    "isClosingOnlyRestricted": true,
                     "equity": 1000
                 }
             }]
@@ -226,7 +255,8 @@ mod tests {
             json!([{
                 "securitiesAccount": {
                     "balance": null,
-                    "is_active": true,
+                    "isDayTrader": false,
+                    "isClosingOnlyRestricted": true,
                     "equity": 1000
                 }
             }])

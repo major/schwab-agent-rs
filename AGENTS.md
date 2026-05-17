@@ -43,9 +43,6 @@ src/
     builder.rs     - OCC symbol construction (21-char format), inline tests
     preview.rs     - SHA-256 tamper-evident preview with 15-min TTL (shared by equity + order)
     lifecycle.rs   - Order lifecycle commands: list, get, cancel with post-action verification
-  portfolio/
-    mod.rs         - Portfolio snapshot with optional positions
-    tests.rs       - Portfolio module tests
   account/
     mod.rs         - Account commands: summary, resolve; account resolver; balance renderer
     tests.rs       - Account module tests
@@ -76,10 +73,9 @@ src/
 
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
-- **account** - Account discovery and resolution (summary, resolve)
+- **account** - Account discovery, balances, positions, and resolution (summary, resolve)
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
 - **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
-- **portfolio** - Account snapshot with optional positions
 - **option** - Option chain data (expirations, chain, screen, contract)
 - **ta** - Technical analysis (dashboard, expected-move)
 - **analyze** - Multi-symbol analysis with partial-failure support
@@ -201,7 +197,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 ### Code Style
 
-- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, portfolio; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle, raw
+- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, account; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle, raw
 - Docstrings on all public items and many private items
 - `#[must_use]` on pure functions
 - `serde_with::skip_serializing_none` for clean JSON output
