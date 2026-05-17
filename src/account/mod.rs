@@ -79,6 +79,7 @@ pub struct AccountSummaryData {
 #[derive(Debug)]
 struct AccountFields {
     account_number: Option<String>,
+    variant_type: &'static str,
     balances: Option<AccountBalances>,
     positions: Option<Vec<Value>>,
 }
@@ -103,7 +104,9 @@ pub struct AccountResolveData {
 pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount>) -> AccountRow {
     AccountRow {
         account_hash: hash_value,
-        nickname: pref.and_then(|p| p.nick_name.clone()),
+        nickname: pref
+            .and_then(|p| p.nick_name.clone())
+            .filter(|n| !n.is_empty()),
         display_account_id: pref.and_then(|p| p.display_acct_id.clone()),
         primary_account: pref.and_then(|p| p.primary_account),
         account_type: pref.and_then(|p| p.r#type.clone()),
@@ -165,12 +168,19 @@ pub(crate) fn render_summary_from_data(
             let fields = extract_account_fields(account, with_positions)?;
             let AccountFields {
                 account_number,
+                variant_type,
                 balances,
                 positions,
             } = fields;
             let hash_value = find_hash_value(account_number.as_deref(), hashes)?;
             let pref = matching_preference(account_number.as_deref(), prefs);
             let mut row = build_account_row(hash_value, pref);
+            if row.nickname.is_none() {
+                row.nickname = row
+                    .account_type
+                    .clone()
+                    .or_else(|| Some(variant_type.to_string()));
+            }
             row.balances = balances;
             row.positions = positions;
             Some(row)
@@ -197,6 +207,7 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
                 .flatten();
             Some(AccountFields {
                 account_number: margin.account_number.clone(),
+                variant_type: "MARGIN",
                 balances,
                 positions,
             })
@@ -211,6 +222,7 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
                 .flatten();
             Some(AccountFields {
                 account_number: cash.account_number.clone(),
+                variant_type: "CASH",
                 balances,
                 positions,
             })
