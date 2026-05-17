@@ -138,6 +138,7 @@ fn equity_instrument() -> AccountsInstrument {
 fn account_summary_default_has_all_none() {
     let summary = AccountSummary::default();
     assert!(summary.account_number.is_none());
+    assert!(summary.nickname.is_none());
     assert!(summary.account_type.is_none());
     assert!(summary.is_closing_only_restricted.is_none());
     assert!(summary.is_day_trader.is_none());
@@ -152,7 +153,8 @@ fn summarize_account_none_returns_empty() {
     let account = Account {
         securities_account: None,
     };
-    let summary = summarize_account(account, true);
+    let summary = summarize_account(account, true, &[]);
+    assert!(summary.nickname.is_none());
     assert!(summary.account_type.is_none());
     assert!(summary.balances.is_none());
 }
@@ -164,9 +166,11 @@ fn summarize_account_margin_variant() {
     let account = Account {
         securities_account: Some(SecuritiesAccount::Margin(ma)),
     };
-    let summary = summarize_account(account, false);
+    let summary = summarize_account(account, false, &[]);
     assert_eq!(summary.account_type, Some("MARGIN"));
     assert_eq!(summary.account_number.as_deref(), Some("11111111"));
+    // No prefs provided, falls back to variant type.
+    assert_eq!(summary.nickname.as_deref(), Some("MARGIN"));
 }
 
 #[test]
@@ -176,9 +180,11 @@ fn summarize_account_cash_variant() {
     let account = Account {
         securities_account: Some(SecuritiesAccount::Cash(ca)),
     };
-    let summary = summarize_account(account, false);
+    let summary = summarize_account(account, false, &[]);
     assert_eq!(summary.account_type, Some("CASH"));
     assert_eq!(summary.account_number.as_deref(), Some("22222222"));
+    // No prefs provided, falls back to variant type.
+    assert_eq!(summary.nickname.as_deref(), Some("CASH"));
 }
 
 // -- summarize_margin_account ---------------------------------------------
@@ -190,7 +196,7 @@ fn margin_account_without_positions_flag() {
     ma.is_day_trader = Some(true);
     ma.is_closing_only_restricted = Some(false);
     ma.positions = Some(vec![bare_position()]);
-    let summary = summarize_margin_account(ma, false);
+    let summary = summarize_margin_account(ma, false, "MARGIN".to_string());
     assert_eq!(summary.account_type, Some("MARGIN"));
     assert_eq!(summary.is_day_trader, Some(true));
     assert_eq!(summary.is_closing_only_restricted, Some(false));
@@ -202,7 +208,7 @@ fn margin_account_without_positions_flag() {
 fn margin_account_with_positions_flag() {
     let mut ma = bare_margin_account();
     ma.positions = Some(vec![bare_position()]);
-    let summary = summarize_margin_account(ma, true);
+    let summary = summarize_margin_account(ma, true, "MARGIN".to_string());
     assert!(summary.positions.is_some());
     assert_eq!(summary.positions.unwrap().len(), 1);
 }
@@ -219,7 +225,7 @@ fn margin_account_with_balances() {
 
     let mut ma = bare_margin_account();
     ma.current_balances = Some(bal);
-    let summary = summarize_margin_account(ma, false);
+    let summary = summarize_margin_account(ma, false, "MARGIN".to_string());
 
     let b = summary.balances.unwrap();
     assert_eq!(b.cash_available_for_trading, Some(num(10_000.0)));
@@ -234,7 +240,7 @@ fn margin_account_with_balances() {
 #[test]
 fn margin_account_no_positions_field() {
     let ma = bare_margin_account();
-    let summary = summarize_margin_account(ma, true);
+    let summary = summarize_margin_account(ma, true, "MARGIN".to_string());
     // positions is None in the source, so even with flag true we get None
     assert!(summary.positions.is_none());
 }
@@ -248,7 +254,7 @@ fn cash_account_without_positions_flag() {
     ca.is_day_trader = Some(false);
     ca.is_closing_only_restricted = Some(true);
     ca.positions = Some(vec![bare_position()]);
-    let summary = summarize_cash_account(ca, false);
+    let summary = summarize_cash_account(ca, false, "CASH".to_string());
     assert_eq!(summary.account_type, Some("CASH"));
     assert_eq!(summary.is_day_trader, Some(false));
     assert_eq!(summary.is_closing_only_restricted, Some(true));
@@ -259,7 +265,7 @@ fn cash_account_without_positions_flag() {
 fn cash_account_with_positions_flag() {
     let mut ca = bare_cash_account();
     ca.positions = Some(vec![bare_position(), bare_position()]);
-    let summary = summarize_cash_account(ca, true);
+    let summary = summarize_cash_account(ca, true, "CASH".to_string());
     assert!(summary.positions.is_some());
     assert_eq!(summary.positions.unwrap().len(), 2);
 }
@@ -273,7 +279,7 @@ fn cash_account_with_balances() {
 
     let mut ca = bare_cash_account();
     ca.current_balances = Some(bal);
-    let summary = summarize_cash_account(ca, false);
+    let summary = summarize_cash_account(ca, false, "CASH".to_string());
 
     let b = summary.balances.unwrap();
     assert_eq!(b.cash_available_for_trading, Some(num(8_000.0)));
@@ -288,7 +294,7 @@ fn cash_account_with_balances() {
 #[test]
 fn cash_account_no_positions_field() {
     let ca = bare_cash_account();
-    let summary = summarize_cash_account(ca, true);
+    let summary = summarize_cash_account(ca, true, "CASH".to_string());
     assert!(summary.positions.is_none());
 }
 
@@ -501,7 +507,7 @@ fn account_summary_serializes_to_json() {
     ma.account_number = Some("99999999".into());
     ma.current_balances = Some(bal);
 
-    let summary = summarize_margin_account(ma, false);
+    let summary = summarize_margin_account(ma, false, "MARGIN".to_string());
     let json = serde_json::to_value(&summary).expect("serialize");
     assert_eq!(json["account_number"], "99999999");
     assert_eq!(json["account_type"], "MARGIN");
@@ -520,10 +526,92 @@ fn account_summary_serializes_to_json() {
 }
 
 #[test]
+fn account_summary_nickname_appears_in_json() {
+    let mut ma = bare_margin_account();
+    ma.account_number = Some("99999999".into());
+    let summary = summarize_margin_account(ma, false, "My Trading".to_string());
+    let json = serde_json::to_value(&summary).expect("serialize");
+    assert_eq!(json["nickname"], "My Trading");
+}
+
+#[test]
 fn portfolio_snapshot_serializes_accounts() {
     let snapshot = PortfolioSnapshot {
         accounts: vec![AccountSummary::default()],
     };
     let json = serde_json::to_value(&snapshot).expect("serialize");
     assert_eq!(json["accounts"].as_array().unwrap().len(), 1);
+}
+
+// -- resolve_nickname -----------------------------------------------------
+
+fn make_pref(
+    account_number: &str,
+    nick_name: Option<&str>,
+    acct_type: Option<&str>,
+) -> UserPreferenceAccount {
+    UserPreferenceAccount {
+        account_color: None,
+        account_number: Some(account_number.to_string()),
+        auto_position_effect: None,
+        display_acct_id: None,
+        nick_name: nick_name.map(str::to_string),
+        primary_account: None,
+        r#type: acct_type.map(str::to_string),
+    }
+}
+
+#[test]
+fn resolve_nickname_uses_nick_name_from_prefs() {
+    let prefs = [make_pref("A1", Some("Joint Taxable"), Some("MARGIN"))];
+    let result = resolve_nickname(Some("A1"), &prefs, "MARGIN");
+    assert_eq!(result, "Joint Taxable");
+}
+
+#[test]
+fn resolve_nickname_falls_back_to_pref_type() {
+    let prefs = [make_pref("A1", None, Some("MARGIN"))];
+    let result = resolve_nickname(Some("A1"), &prefs, "MARGIN");
+    assert_eq!(result, "MARGIN");
+}
+
+#[test]
+fn resolve_nickname_falls_back_to_variant_type() {
+    let prefs: Vec<UserPreferenceAccount> = vec![];
+    let result = resolve_nickname(Some("A1"), &prefs, "CASH");
+    assert_eq!(result, "CASH");
+}
+
+#[test]
+fn resolve_nickname_skips_empty_nick_name() {
+    let prefs = [make_pref("A1", Some(""), Some("MARGIN"))];
+    let result = resolve_nickname(Some("A1"), &prefs, "MARGIN");
+    assert_eq!(result, "MARGIN");
+}
+
+#[test]
+fn resolve_nickname_no_account_number() {
+    let prefs = [make_pref("A1", Some("Trading"), Some("MARGIN"))];
+    let result = resolve_nickname(None, &prefs, "CASH");
+    assert_eq!(result, "CASH");
+}
+
+#[test]
+fn resolve_nickname_no_matching_pref() {
+    let prefs = [make_pref("A2", Some("Other"), Some("CASH"))];
+    let result = resolve_nickname(Some("A1"), &prefs, "MARGIN");
+    assert_eq!(result, "MARGIN");
+}
+
+#[test]
+fn summarize_account_with_prefs() {
+    let mut ma = bare_margin_account();
+    ma.account_number = Some("11111111".into());
+    let prefs = [make_pref("11111111", Some("Joint Taxable"), Some("MARGIN"))];
+    let account = Account {
+        securities_account: Some(SecuritiesAccount::Margin(ma)),
+    };
+    let summary = summarize_account(account, false, &prefs);
+    assert_eq!(summary.nickname.as_deref(), Some("Joint Taxable"));
+    assert_eq!(summary.account_type, Some("MARGIN"));
 }

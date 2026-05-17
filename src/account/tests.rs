@@ -208,7 +208,7 @@ fn build_account_row_empty_nickname() {
     let pref = make_pref("A1", Some(""), Some("***1234"), false, "CASH");
     let row = build_account_row("HASH3".to_string(), Some(&pref));
 
-    assert_eq!(row.nickname.as_deref(), Some(""));
+    assert!(row.nickname.is_none());
 }
 
 #[test]
@@ -603,7 +603,7 @@ fn account_summary_positions_none_when_not_requested() {
 }
 
 #[test]
-fn account_summary_missing_nickname() {
+fn account_summary_missing_nickname_falls_back_to_variant_type() {
     let hashes = [make_hash("A1", "HASH1")];
     // No preference data at all for this account.
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
@@ -614,7 +614,8 @@ fn account_summary_missing_nickname() {
     assert_eq!(summary.accounts.len(), 1);
     let row = &summary.accounts[0];
     assert_eq!(row.account_hash, "HASH1");
-    assert!(row.nickname.is_none());
+    // Falls back to variant type when no preference data exists.
+    assert_eq!(row.nickname.as_deref(), Some("CASH"));
     assert!(row.display_account_id.is_none());
     assert!(row.primary_account.is_none());
     assert!(row.account_type.is_none());
@@ -623,6 +624,21 @@ fn account_summary_missing_nickname() {
     assert!(row.balances.is_some());
     let serialized = serde_json::to_value(row).unwrap();
     assert_eq!(serialized["balances"]["kind"], "cash");
+}
+
+#[test]
+fn account_summary_no_nick_name_falls_back_to_pref_type() {
+    let hashes = [make_hash("A1", "HASH1")];
+    // Preference exists but nick_name is None; should fall back to pref type.
+    let prefs = [make_pref("A1", None, Some("***1111"), true, "MARGIN")];
+    let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    let row = &summary.accounts[0];
+    assert_eq!(row.nickname.as_deref(), Some("MARGIN"));
+    assert_eq!(row.account_type.as_deref(), Some("MARGIN"));
 }
 
 #[test]

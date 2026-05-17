@@ -1,6 +1,6 @@
 use schwab::{
     Account, AccountsInstrument, CashAccount, CashBalance, MarginAccount, MarginBalance, Position,
-    SecuritiesAccount,
+    SecuritiesAccount, UserPreferenceAccount,
 };
 use serde::Serialize;
 use serde_json::{Value, to_value};
@@ -18,17 +18,29 @@ pub(crate) async fn handle(cli: &Cli, command: &PortfolioCommand) -> Result<Valu
 
 /// Fetches all accounts from the Schwab API and returns a serialized [`PortfolioSnapshot`].
 ///
-/// Uses [`raw::fetch_accounts`](crate::raw::fetch_accounts) to normalize Schwab
-/// API quirks (object-wrapped arrays, boolean `false` in numeric fields) before
-/// deserialization. Passes the `positions` field query parameter only when
+/// Uses `raw::fetch_accounts` to normalize Schwab API quirks (object-wrapped
+/// arrays, boolean `false` in numeric fields) before deserialization. Also
+/// fetches user preferences so that each account includes a human-readable
+/// nickname. Passes the `positions` field query parameter only when
 /// `args.positions` is true.
 async fn snapshot(cli: &Cli, args: &PortfolioSnapshotArgs) -> Result<Value, AppError> {
-    let token = auth::provider(cli)?.token().await?;
+    let provider = auth::provider(cli)?;
+    let token = provider.token().await?;
+    let client = provider.client().await?;
+
+    let prefs: Vec<UserPreferenceAccount> = client
+        .get_user_preference()
+        .await?
+        .into_iter()
+        .filter_map(|p| p.accounts)
+        .flatten()
+        .collect();
+
     let fields = args.positions.then_some("positions");
     let accounts = crate::raw::fetch_accounts(&token, fields)
         .await?
         .into_iter()
-        .map(|account| summarize_account(account, args.positions))
+        .map(|account| summarize_account(account, args.positions, &prefs))
         .collect::<Vec<_>>();
     Ok(to_value(PortfolioSnapshot { accounts })?)
 }
@@ -36,17 +48,49 @@ async fn snapshot(cli: &Cli, args: &PortfolioSnapshotArgs) -> Result<Value, AppE
 /// Converts a raw [`Account`] into a normalized [`AccountSummary`].
 ///
 /// Dispatches to the margin or cash variant based on the account type.
+/// Looks up a human-readable nickname from user preferences, falling back
+/// to the preference account type or the securities account variant name.
 /// Returns an empty summary when `securities_account` is `None`.
-fn summarize_account(account: Account, include_positions: bool) -> AccountSummary {
+fn summarize_account(
+    account: Account,
+    include_positions: bool,
+    prefs: &[UserPreferenceAccount],
+) -> AccountSummary {
     match account.securities_account {
-        Some(SecuritiesAccount::Margin(account)) => {
-            summarize_margin_account(account, include_positions)
+        Some(SecuritiesAccount::Margin(margin_account)) => {
+            let nickname =
+                resolve_nickname(margin_account.account_number.as_deref(), prefs, "MARGIN");
+            summarize_margin_account(margin_account, include_positions, nickname)
         }
-        Some(SecuritiesAccount::Cash(account)) => {
-            summarize_cash_account(account, include_positions)
+        Some(SecuritiesAccount::Cash(cash_account)) => {
+            let nickname = resolve_nickname(cash_account.account_number.as_deref(), prefs, "CASH");
+            summarize_cash_account(cash_account, include_positions, nickname)
         }
         None => AccountSummary::default(),
     }
+}
+
+/// Resolves a human-readable nickname for an account.
+///
+/// Checks user preferences for a `nick_name` first, then falls back to the
+/// preference `type` field, and finally to the securities account variant name
+/// (e.g. `"MARGIN"` or `"CASH"`).
+#[must_use]
+fn resolve_nickname(
+    account_number: Option<&str>,
+    prefs: &[UserPreferenceAccount],
+    variant_type: &str,
+) -> String {
+    let pref = account_number.and_then(|num| {
+        prefs
+            .iter()
+            .find(|p| p.account_number.as_deref() == Some(num))
+    });
+
+    pref.and_then(|p| p.nick_name.clone())
+        .filter(|n| !n.is_empty())
+        .or_else(|| pref.and_then(|p| p.r#type.clone()))
+        .unwrap_or_else(|| variant_type.to_string())
 }
 
 /// Builds an [`AccountSummary`] from any account type that carries the standard fields.
@@ -54,9 +98,10 @@ fn summarize_account(account: Account, include_positions: bool) -> AccountSummar
 /// Both [`MarginAccount`] and [`CashAccount`] share the same field names, so this macro
 /// captures the shared construction logic and avoids duplicating the field mappings.
 macro_rules! build_account_summary {
-    ($account:expr, $account_type:expr, $include_positions:expr) => {
+    ($account:expr, $account_type:expr, $include_positions:expr, $nickname:expr) => {
         AccountSummary {
             account_number: $account.account_number,
+            nickname: Some($nickname),
             account_type: Some($account_type),
             is_closing_only_restricted: $account.is_closing_only_restricted,
             is_day_trader: $account.is_day_trader,
@@ -69,13 +114,21 @@ macro_rules! build_account_summary {
 }
 
 /// Converts a [`MarginAccount`] into an [`AccountSummary`] with `account_type` set to `"MARGIN"`.
-fn summarize_margin_account(account: MarginAccount, include_positions: bool) -> AccountSummary {
-    build_account_summary!(account, "MARGIN", include_positions)
+fn summarize_margin_account(
+    account: MarginAccount,
+    include_positions: bool,
+    nickname: String,
+) -> AccountSummary {
+    build_account_summary!(account, "MARGIN", include_positions, nickname)
 }
 
 /// Converts a [`CashAccount`] into an [`AccountSummary`] with `account_type` set to `"CASH"`.
-fn summarize_cash_account(account: CashAccount, include_positions: bool) -> AccountSummary {
-    build_account_summary!(account, "CASH", include_positions)
+fn summarize_cash_account(
+    account: CashAccount,
+    include_positions: bool,
+    nickname: String,
+) -> AccountSummary {
+    build_account_summary!(account, "CASH", include_positions, nickname)
 }
 
 /// Maps an optional list of [`Position`]s into an optional list of [`PositionSummary`]s.
@@ -98,6 +151,11 @@ struct PortfolioSnapshot {
 struct AccountSummary {
     /// The masked account number as returned by the API.
     account_number: Option<String>,
+    /// Human-readable nickname for the account, sourced from user preferences.
+    ///
+    /// Falls back to the preference account type or the securities account
+    /// variant name (e.g. `"MARGIN"`, `"CASH"`) when no nickname is configured.
+    nickname: Option<String>,
     /// Account type: `"MARGIN"` or `"CASH"`.
     account_type: Option<&'static str>,
     /// Whether the account is restricted to closing orders only.
