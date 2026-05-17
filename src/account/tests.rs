@@ -480,7 +480,7 @@ fn account_summary_without_positions() {
         make_cash_account("A2", Some(make_cash_balance()), None),
     ];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 2);
 
@@ -557,7 +557,7 @@ fn account_summary_with_positions() {
         Some(positions),
     )];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true, false);
 
     assert_eq!(summary.accounts.len(), 1);
     let row = &summary.accounts[0];
@@ -608,7 +608,7 @@ fn account_summary_positions_none_when_not_requested() {
         Some(positions),
     )];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     assert!(summary.accounts[0].positions.is_none());
@@ -621,7 +621,7 @@ fn account_summary_missing_nickname_falls_back_to_variant_type() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_cash_account("A1", Some(make_cash_balance()), None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     let row = &summary.accounts[0];
@@ -645,7 +645,7 @@ fn account_summary_no_nick_name_falls_back_to_pref_type() {
     let prefs = [make_pref("A1", None, Some("***1111"), true, "MARGIN")];
     let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     let row = &summary.accounts[0];
@@ -667,7 +667,7 @@ fn account_summary_skips_accounts_without_securities_account() {
         securities_account: None,
     }];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert!(summary.accounts.is_empty());
 }
@@ -678,7 +678,7 @@ fn account_summary_skips_accounts_without_matching_hash() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     // A1 has no matching hash, so it should be excluded.
     assert!(summary.accounts.is_empty());
@@ -690,7 +690,7 @@ fn account_summary_margin_balance_fields() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_margin_account("A1", Some(make_margin_balance()), None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
     let row = &summary.accounts[0];
 
     match row.balances.as_ref().unwrap() {
@@ -712,7 +712,7 @@ fn account_summary_cash_balance_fields() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_cash_account("A1", Some(make_cash_balance()), None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
     let row = &summary.accounts[0];
 
     match row.balances.as_ref().unwrap() {
@@ -731,7 +731,7 @@ fn account_summary_no_balances_when_absent() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_margin_account("A1", None, None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     assert!(summary.accounts[0].balances.is_none());
@@ -749,7 +749,7 @@ fn account_summary_includes_account_flags() {
         m.is_day_trader = Some(false);
     }
 
-    let summary = render_summary_from_data(&[account], &hashes, &prefs, false);
+    let summary = render_summary_from_data(&[account], &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     assert_eq!(summary.accounts[0].is_closing_only_restricted, Some(true));
@@ -762,9 +762,145 @@ fn account_summary_omits_absent_account_flags() {
     let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
     let accounts = vec![make_cash_account("A1", None, None)];
 
-    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
 
     assert_eq!(summary.accounts.len(), 1);
     assert!(summary.accounts[0].is_closing_only_restricted.is_none());
     assert!(summary.accounts[0].is_day_trader.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// with_positions_only filtering tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn with_positions_only_excludes_accounts_without_positions() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Has Positions"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Empty"), Some("***2222"), false, "CASH"),
+    ];
+    let positions = vec![schwab::Position {
+        aged_quantity: None,
+        average_long_price: None,
+        average_price: Some(number(150.0)),
+        average_short_price: None,
+        current_day_cost: None,
+        current_day_profit_loss: None,
+        current_day_profit_loss_percentage: None,
+        instrument: Some(AccountsInstrument::Equity(AccountEquity {
+            asset_type: Some(InstrumentAssetType::Equity),
+            cusip: None,
+            description: Some("Apple Inc".to_string()),
+            instrument_id: None,
+            net_change: None,
+            symbol: Some("AAPL".to_string()),
+        })),
+        long_open_profit_loss: None,
+        long_quantity: Some(number(10.0)),
+        maintenance_requirement: None,
+        market_value: Some(number(1_500.0)),
+        previous_session_long_quantity: None,
+        previous_session_short_quantity: None,
+        settled_long_quantity: None,
+        settled_short_quantity: None,
+        short_open_profit_loss: None,
+        short_quantity: None,
+        tax_lot_average_long_price: None,
+        tax_lot_average_short_price: None,
+    }];
+    let accounts = vec![
+        make_margin_account("A1", Some(make_margin_balance()), Some(positions)),
+        make_cash_account("A2", Some(make_cash_balance()), None),
+    ];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true, true);
+
+    assert_eq!(summary.accounts.len(), 1);
+    assert_eq!(summary.accounts[0].account_hash, "HASH1");
+    assert_eq!(
+        summary.accounts[0].nickname.as_deref(),
+        Some("Has Positions")
+    );
+}
+
+#[test]
+fn with_positions_only_excludes_accounts_with_empty_positions_vec() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Empty Vec"),
+        Some("***1111"),
+        true,
+        "MARGIN",
+    )];
+    let accounts = vec![make_margin_account(
+        "A1",
+        Some(make_margin_balance()),
+        Some(vec![]),
+    )];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true, true);
+
+    assert!(summary.accounts.is_empty());
+}
+
+#[test]
+fn with_positions_only_false_preserves_all_accounts() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Trading"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Savings"), Some("***2222"), false, "CASH"),
+    ];
+    let accounts = vec![
+        make_margin_account("A1", Some(make_margin_balance()), None),
+        make_cash_account("A2", Some(make_cash_balance()), None),
+    ];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false, false);
+
+    assert_eq!(summary.accounts.len(), 2);
+}
+
+#[test]
+fn with_positions_only_keeps_all_accounts_when_all_have_positions() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Margin"), Some("***1111"), true, "MARGIN"),
+        make_pref("A2", Some("Cash"), Some("***2222"), false, "CASH"),
+    ];
+    let position = schwab::Position {
+        aged_quantity: None,
+        average_long_price: None,
+        average_price: None,
+        average_short_price: None,
+        current_day_cost: None,
+        current_day_profit_loss: None,
+        current_day_profit_loss_percentage: None,
+        instrument: None,
+        long_open_profit_loss: None,
+        long_quantity: None,
+        maintenance_requirement: None,
+        market_value: None,
+        previous_session_long_quantity: None,
+        previous_session_short_quantity: None,
+        settled_long_quantity: None,
+        settled_short_quantity: None,
+        short_open_profit_loss: None,
+        short_quantity: None,
+        tax_lot_average_long_price: None,
+        tax_lot_average_short_price: None,
+    };
+    let accounts = vec![
+        make_margin_account(
+            "A1",
+            Some(make_margin_balance()),
+            Some(vec![position.clone()]),
+        ),
+        make_cash_account("A2", Some(make_cash_balance()), Some(vec![position])),
+    ];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true, true);
+
+    assert_eq!(summary.accounts.len(), 2);
 }

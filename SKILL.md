@@ -58,13 +58,15 @@ Discover and resolve accounts before placing orders.
 Recommended workflow: `account summary` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
 
 ```bash
-schwab-agent account summary                    # list accounts with balances
-schwab-agent account summary --positions        # include current holdings
-schwab-agent account resolve Trading            # resolve nickname to canonical hash
-schwab-agent account resolve ABCDEF1234567890  # verify a known hash
+schwab-agent account summary                       # list accounts with balances
+schwab-agent account summary --positions           # include current holdings
+schwab-agent account summary --with-positions-only # only accounts that hold positions
+schwab-agent account resolve Trading               # resolve nickname to canonical hash
+schwab-agent account resolve ABCDEF1234567890     # verify a known hash
 ```
 
 The `--account` flag on stock and order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
+
 
 ## Stock Orders
 

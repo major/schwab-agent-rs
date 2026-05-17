@@ -98,10 +98,12 @@ Account discovery, balances, positions, and resolution for LLM agents: `summary`
 Use `account summary` to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands.
 
 ```bash
-schwab-agent account summary              # list all accounts with balances
-schwab-agent account summary --positions  # include holdings
-schwab-agent account resolve Trading      # resolve nickname to canonical hash
+schwab-agent account summary                       # list all accounts with balances
+schwab-agent account summary --positions           # include holdings
+schwab-agent account summary --with-positions-only # only accounts that hold positions
+schwab-agent account resolve Trading               # resolve nickname to canonical hash
 ```
+
 
 ### stock
 
