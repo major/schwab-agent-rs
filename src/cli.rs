@@ -52,7 +52,6 @@ impl Cli {
             Command::Market(MarketCommand::History(_)) => "market.history",
             Command::Market(MarketCommand::Quote(_)) => "market.quote",
             Command::Order(_) => "order",
-            Command::Portfolio(PortfolioCommand::Snapshot(_)) => "portfolio.snapshot",
             Command::Stock(_) => "stock",
             Command::Ta(TaCommand::Dashboard(_)) => "ta.dashboard",
             Command::Ta(TaCommand::ExpectedMove(_)) => "ta.expected-move",
@@ -85,16 +84,13 @@ pub enum Command {
     /// Option order construction, preview, and placement workflows.
     #[command(subcommand)]
     Order(crate::order::OrderCommand),
-    /// Portfolio inspection workflows for account and position summaries.
-    #[command(subcommand)]
-    Portfolio(PortfolioCommand),
     /// Stock (equity) order construction, preview, and placement workflows.
     #[command(subcommand)]
     Stock(crate::equity::EquityCommand),
     /// Technical analysis indicator workflows.
     #[command(subcommand)]
     Ta(TaCommand),
-    /// Account discovery and resolution workflows.
+    /// Account discovery, balances, positions, and resolution workflows.
     #[command(subcommand)]
     Account(AccountCommand),
 }
@@ -462,25 +458,15 @@ pub struct QuoteArgs {
     pub api_fields: Option<String>,
 }
 
-/// Portfolio commands.
-#[derive(Debug, Subcommand)]
-pub enum PortfolioCommand {
-    /// Get compact account and position summaries for portfolio triage.
-    Snapshot(PortfolioSnapshotArgs),
-}
-
-/// Arguments for `portfolio snapshot`.
-#[derive(Debug, Args)]
-pub struct PortfolioSnapshotArgs {
-    /// Include individual positions in each account summary.
-    #[arg(long)]
-    pub positions: bool,
-}
-
 /// Account commands.
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
-    /// Get compact account summaries with balance and optional position data.
+    /// Get all accounts with balances, account flags, and optional positions.
+    ///
+    /// This is the canonical "show me everything" command. Returns account
+    /// hashes, nicknames, balance summaries (margin or cash), day-trader and
+    /// closing-only flags, and optionally open positions. Use --positions to
+    /// include per-account position details.
     Summary(AccountSummaryArgs),
     /// Resolve an account hash or nickname to its canonical account hash.
     Resolve(AccountResolveArgs),
@@ -690,12 +676,6 @@ mod tests {
             "--call",
         ]);
         assert_eq!(cli.command_name(), "option.contract");
-    }
-
-    #[test]
-    fn command_name_portfolio_snapshot() {
-        let cli = Cli::parse_from(["schwab-agent", "portfolio", "snapshot"]);
-        assert_eq!(cli.command_name(), "portfolio.snapshot");
     }
 
     #[test]

@@ -66,13 +66,6 @@ schwab-agent account resolve ABCDEF1234567890  # verify a known hash
 
 The `--account` flag on stock and order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
 
-## Portfolio
-
-```bash
-schwab-agent portfolio snapshot            # account snapshot
-schwab-agent portfolio snapshot --positions   # include holdings
-```
-
 ## Stock Orders
 
 Buy/sell shares of stock. Recommended LLM workflow: `preview --save-preview` -> `place-from-preview` (same digest/TTL system as option orders).

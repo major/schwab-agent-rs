@@ -93,7 +93,7 @@ schwab-agent market history SPY --all-fields
 
 ### account
 
-Compact account discovery for LLM agents: `summary`, `resolve`.
+Account discovery, balances, positions, and resolution for LLM agents: `summary`, `resolve`.
 
 Use `account summary` to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands.
 
@@ -101,14 +101,6 @@ Use `account summary` to list available account hashes and nicknames, then pass 
 schwab-agent account summary              # list all accounts with balances
 schwab-agent account summary --positions  # include holdings
 schwab-agent account resolve Trading      # resolve nickname to canonical hash
-```
-
-### portfolio
-
-Account snapshot with optional positions.
-
-```bash
-schwab-agent portfolio snapshot --positions
 ```
 
 ### stock

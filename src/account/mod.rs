@@ -36,6 +36,8 @@ pub struct AccountRow {
     pub display_account_id: Option<String>,
     pub primary_account: Option<bool>,
     pub account_type: Option<String>,
+    pub is_closing_only_restricted: Option<bool>,
+    pub is_day_trader: Option<bool>,
     pub balances: Option<AccountBalances>,
     pub positions: Option<Vec<Value>>,
 }
@@ -80,6 +82,8 @@ pub struct AccountSummaryData {
 struct AccountFields {
     account_number: Option<String>,
     variant_type: &'static str,
+    is_closing_only_restricted: Option<bool>,
+    is_day_trader: Option<bool>,
     balances: Option<AccountBalances>,
     positions: Option<Vec<Value>>,
 }
@@ -110,6 +114,8 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
         display_account_id: pref.and_then(|p| p.display_acct_id.clone()),
         primary_account: pref.and_then(|p| p.primary_account),
         account_type: pref.and_then(|p| p.r#type.clone()),
+        is_closing_only_restricted: None,
+        is_day_trader: None,
         balances: None,
         positions: None,
     }
@@ -169,6 +175,8 @@ pub(crate) fn render_summary_from_data(
             let AccountFields {
                 account_number,
                 variant_type,
+                is_closing_only_restricted,
+                is_day_trader,
                 balances,
                 positions,
             } = fields;
@@ -181,6 +189,8 @@ pub(crate) fn render_summary_from_data(
                     .clone()
                     .or_else(|| Some(variant_type.to_string()));
             }
+            row.is_closing_only_restricted = is_closing_only_restricted;
+            row.is_day_trader = is_day_trader;
             row.balances = balances;
             row.positions = positions;
             Some(row)
@@ -208,6 +218,8 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
             Some(AccountFields {
                 account_number: margin.account_number.clone(),
                 variant_type: "MARGIN",
+                is_closing_only_restricted: margin.is_closing_only_restricted,
+                is_day_trader: margin.is_day_trader,
                 balances,
                 positions,
             })
@@ -223,6 +235,8 @@ fn extract_account_fields(account: &Account, with_positions: bool) -> Option<Acc
             Some(AccountFields {
                 account_number: cash.account_number.clone(),
                 variant_type: "CASH",
+                is_closing_only_restricted: cash.is_closing_only_restricted,
+                is_day_trader: cash.is_day_trader,
                 balances,
                 positions,
             })

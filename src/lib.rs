@@ -11,7 +11,6 @@ mod market;
 mod options;
 mod order;
 mod output;
-mod portfolio;
 mod raw;
 mod shared;
 mod ta;
@@ -85,7 +84,6 @@ pub async fn execute(cli: Cli) -> Result<Value, AppError> {
             }
         }
         Command::Order(_) => unreachable!("handled above"),
-        Command::Portfolio(command) => portfolio::handle(&cli, command).await,
         Command::Stock(_) => unreachable!("handled above"),
         Command::Account(command) => account::handle(&cli, command).await,
     }

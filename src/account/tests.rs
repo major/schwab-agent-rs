@@ -19,6 +19,8 @@ fn account_summary_serializes_correctly() {
                 display_account_id: Some("****1234".to_string()),
                 primary_account: Some(true),
                 account_type: Some("MARGIN".to_string()),
+                is_closing_only_restricted: Some(false),
+                is_day_trader: Some(true),
                 balances: Some(AccountBalances::Margin(MarginBalanceSummary {
                     cash_available_for_trading: Some(number(10.0)),
                     cash_available_for_withdrawal: Some(number(11.0)),
@@ -35,6 +37,8 @@ fn account_summary_serializes_correctly() {
                 display_account_id: Some("****5678".to_string()),
                 primary_account: Some(false),
                 account_type: Some("CASH".to_string()),
+                is_closing_only_restricted: None,
+                is_day_trader: None,
                 balances: Some(AccountBalances::Cash(CashBalanceSummary {
                     cash_available_for_trading: Some(number(20.0)),
                     cash_available_for_withdrawal: Some(number(21.0)),
@@ -50,6 +54,10 @@ fn account_summary_serializes_correctly() {
     assert_eq!(accounts.len(), 2);
     assert_eq!(accounts[0]["account_hash"], "hash-1");
     assert_eq!(accounts[1]["account_hash"], "hash-2");
+    assert_eq!(accounts[0]["is_closing_only_restricted"], false);
+    assert_eq!(accounts[0]["is_day_trader"], true);
+    assert!(accounts[1].get("is_closing_only_restricted").is_none());
+    assert!(accounts[1].get("is_day_trader").is_none());
     assert!(accounts[0].get("positions").is_none());
     assert!(accounts[1].get("positions").is_none());
 }
@@ -82,6 +90,8 @@ fn account_row_omits_absent_optional_fields() {
         display_account_id: None,
         primary_account: None,
         account_type: None,
+        is_closing_only_restricted: None,
+        is_day_trader: None,
         balances: None,
         positions: None,
     };
@@ -92,6 +102,8 @@ fn account_row_omits_absent_optional_fields() {
     assert!(serialized.get("display_account_id").is_none());
     assert!(serialized.get("primary_account").is_none());
     assert!(serialized.get("account_type").is_none());
+    assert!(serialized.get("is_closing_only_restricted").is_none());
+    assert!(serialized.get("is_day_trader").is_none());
     assert!(serialized.get("balances").is_none());
     assert!(serialized.get("positions").is_none());
 }
@@ -723,4 +735,36 @@ fn account_summary_no_balances_when_absent() {
 
     assert_eq!(summary.accounts.len(), 1);
     assert!(summary.accounts[0].balances.is_none());
+}
+
+#[test]
+fn account_summary_includes_account_flags() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+
+    // Build a margin account with both flags set.
+    let mut account = make_margin_account("A1", None, None);
+    if let Some(schwab::SecuritiesAccount::Margin(ref mut m)) = account.securities_account {
+        m.is_closing_only_restricted = Some(true);
+        m.is_day_trader = Some(false);
+    }
+
+    let summary = render_summary_from_data(&[account], &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    assert_eq!(summary.accounts[0].is_closing_only_restricted, Some(true));
+    assert_eq!(summary.accounts[0].is_day_trader, Some(false));
+}
+
+#[test]
+fn account_summary_omits_absent_account_flags() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let accounts = vec![make_cash_account("A1", None, None)];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, false);
+
+    assert_eq!(summary.accounts.len(), 1);
+    assert!(summary.accounts[0].is_closing_only_restricted.is_none());
+    assert!(summary.accounts[0].is_day_trader.is_none());
 }
