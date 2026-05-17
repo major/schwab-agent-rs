@@ -8,7 +8,7 @@ Rust CLI binary (`schwab-agent`) wrapping the `schwab` crate to provide agent-or
 
 ### Architecture Boundary: schwab-rs vs schwab-agent-rs
 
-`schwab-rs` is a low-level API crate with nearly zero data processing. It handles auth, HTTP transport, and typed deserialization of Schwab API responses, but does NOT sanitize, transform, or work around API quirks. All data munging, response normalization, and workaround logic belongs in `schwab-agent-rs`. When the Schwab API returns unexpected formats (e.g., object-wrapped arrays, boolean `false` in numeric fields), the fix goes here in schwab-agent-rs using raw request methods from schwab-rs, not in schwab-rs itself.
+`schwab-rs` is a low-level API crate with nearly zero data processing. It handles auth, HTTP transport, and typed deserialization of Schwab API responses, but does NOT sanitize, transform, or work around API quirks. All data munging, response normalization, and workaround logic belongs in `schwab-agent-rs`. When the Schwab API returns unexpected formats (e.g., object-wrapped arrays, boolean `false` in numeric fields), the fix goes here in schwab-agent-rs using `Provider::token()` for auth and direct HTTP requests via reqwest, not in schwab-rs itself. The `raw` module (`src/raw.rs`) centralizes these workarounds.
 
 - Edition 2024, MSRV 1.95
 - Published crate once manually, then released through `release-plz` with crates.io Trusted Publishing
@@ -24,6 +24,7 @@ src/
   output.rs        - ErrorBody struct for structured error JSON output
   shared.rs        - Shared types: SessionChoice, DurationChoice, to_number() helper
   config.rs        - Agent config: load shared config, mutable-operation guard
+  raw.rs           - Raw Schwab API requests with response normalization (object unwrap, false→null)
   error/
     mod.rs         - AppError enum (thiserror) with stable codes, exit codes, categories, hints
     tests.rs       - Error module tests
@@ -169,6 +170,7 @@ Commands output raw JSON data payloads directly (no wrapper). Errors output an `
 
 - `clap` (derive) - CLI parsing
 - `schwab` - Schwab API client
+- `reqwest` - Direct HTTP requests for raw API workarounds
 - `serde` / `serde_json` - Serialization
 - `serde_with` - `skip_serializing_none` for clean JSON
 - `thiserror` - Error derivation
@@ -199,7 +201,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 ### Code Style
 
-- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, portfolio; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle
+- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, portfolio; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle, raw
 - Docstrings on all public items and many private items
 - `#[must_use]` on pure functions
 - `serde_with::skip_serializing_none` for clean JSON output

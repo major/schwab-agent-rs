@@ -18,12 +18,14 @@ pub(crate) async fn handle(cli: &Cli, command: &PortfolioCommand) -> Result<Valu
 
 /// Fetches all accounts from the Schwab API and returns a serialized [`PortfolioSnapshot`].
 ///
-/// Passes the `positions` field query parameter only when `args.positions` is true.
+/// Uses [`raw::fetch_accounts`](crate::raw::fetch_accounts) to normalize Schwab
+/// API quirks (object-wrapped arrays, boolean `false` in numeric fields) before
+/// deserialization. Passes the `positions` field query parameter only when
+/// `args.positions` is true.
 async fn snapshot(cli: &Cli, args: &PortfolioSnapshotArgs) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
+    let token = auth::provider(cli)?.token().await?;
     let fields = args.positions.then_some("positions");
-    let accounts = client
-        .get_accounts(fields)
+    let accounts = crate::raw::fetch_accounts(&token, fields)
         .await?
         .into_iter()
         .map(|account| summarize_account(account, args.positions))
