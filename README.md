@@ -206,9 +206,15 @@ CI runs on Ubuntu, macOS, and Windows with MSRV verification against 1.95.
 
 ## Release
 
-Releases use `release-plz` and are triggered manually from GitHub Actions. The `release-pr` job opens or updates a release PR with the version bump, `Cargo.lock` update, and `CHANGELOG.md` entries from Conventional Commits. After that PR lands on `main`, running the workflow again publishes to crates.io, creates the git tag, and creates the GitHub release.
+Releases are fully automated on push to main using three chained components:
 
-The first crate release must be published manually with a crates.io token that has `publish-new` scope. After that first publish, configure crates.io Trusted Publishing for this repository with workflow filename `release-plz.yml`; later publishes use GitHub Actions OIDC instead of a `CARGO_REGISTRY_TOKEN` secret.
+1. **git-cliff** generates changelogs from Conventional Commits
+2. **release-plz** creates/updates a release PR, publishes to crates.io via Trusted Publishing, and creates git tags
+3. **cargo-dist** builds cross-platform binaries (x86_64 Linux, x86_64/aarch64 macOS, x86_64 Windows) and creates GitHub Releases with shell and PowerShell installers
+
+Push commits to `main`, release-plz opens a release PR. Merge it, and the pipeline publishes the crate, tags the release, builds binaries, and creates the GitHub Release automatically.
+
+The first crate release must be published manually with a crates.io token that has `publish-new` scope. After that first publish, configure crates.io Trusted Publishing for this repository with workflow filename `cd.yml`; subsequent publishes use GitHub Actions OIDC instead of a `CARGO_REGISTRY_TOKEN` secret.
 
 ## License
 

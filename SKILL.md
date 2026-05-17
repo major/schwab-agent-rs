@@ -15,7 +15,7 @@ export SCHWAB_CLIENT_SECRET="..."
 
 ## Release Notes
 
-This crate is published as `schwab-agent-rs`. Releases are handled by the manual `release-plz` GitHub Actions workflow after the first manual crates.io publish. The workflow creates release PRs from Conventional Commits and, after the release PR lands, publishes with crates.io Trusted Publishing via GitHub Actions OIDC.
+This crate is published as `schwab-agent-rs`. Releases are automated on push to main: release-plz creates release PRs from Conventional Commits, publishes to crates.io with Trusted Publishing, and creates git tags. cargo-dist then builds cross-platform binaries and creates GitHub Releases with shell and PowerShell installers.
 
 ## Mutable Operation Guard
 
