@@ -67,7 +67,12 @@ fn compute_digest(payload: &SavedPreview) -> Result<String, AppError> {
         .map_err(|e| AppError::Preview(format!("failed to serialize preview payload: {e}")))?;
     let mut hasher = Sha256::new();
     hasher.update(json.as_bytes());
-    Ok(format!("{:x}", hasher.finalize()))
+    let hash = hasher.finalize();
+    Ok(hash.iter().fold(String::with_capacity(64), |mut s, b| {
+        use std::fmt::Write;
+        let _ = write!(s, "{b:02x}");
+        s
+    }))
 }
 
 /// Saves an order preview to disk and returns its digest.
