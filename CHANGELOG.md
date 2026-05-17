@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-05-17
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(deps)* Update rust crate schwab to 0.2 ([#37](https://github.com/major/schwab-agent-rs/issues/37))
+- *(deps)* Update rust crate sha2 to 0.11 ([#41](https://github.com/major/schwab-agent-rs/issues/41))
+
+
 ## [0.2.1] - 2026-05-17
 
 ### <!-- 0 -->🚀 Features
