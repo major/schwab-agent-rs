@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-05-17
+
+### <!-- 0 -->🚀 Features
+
+- Add aarch64 Linux binary to release builds
+
+
 ## [0.2.0] - 2026-05-17
 
 ### <!-- 0 -->🚀 Features
