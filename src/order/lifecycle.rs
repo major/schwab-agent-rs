@@ -20,17 +20,25 @@ use crate::verify;
 // CLI argument structs
 // ---------------------------------------------------------------------------
 
-/// List orders for an account, or all linked accounts if `--account` is
-/// omitted.
+/// List orders for an account, defaulting to the primary account when omitted.
+///
+/// `--account` accepts a raw account hash or a nickname (same resolution as
+/// `account summary`). When omitted, the primary account is used; if no
+/// primary is set, the first account is used. Use `--all-accounts` to query
+/// every linked account instead.
 ///
 /// By default, lists orders entered in the last 60 days. Use `--recent` for
 /// the last 24 hours, or `--from`/`--to` for a custom range. Pass `--status`
 /// to filter by a specific order status (e.g., WORKING, FILLED, CANCELED).
 #[derive(Debug, Args)]
 pub struct OrderListArgs {
-    /// Account hash. If omitted, returns orders for all linked accounts.
-    #[arg(long)]
+    /// Account hash or nickname. Defaults to the primary account when omitted.
+    #[arg(long, conflicts_with = "all_accounts")]
     pub account: Option<String>,
+
+    /// Query orders across all linked accounts instead of resolving one account.
+    #[arg(long, conflicts_with = "account")]
+    pub all_accounts: bool,
 
     /// Filter by order status (e.g. WORKING, FILLED, CANCELED).
     #[arg(long)]
@@ -95,9 +103,16 @@ enum RangeBoundary {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// Lists orders, optionally filtered by account, status, and time range.
+/// Lists orders filtered by account, status, and time range.
+///
+/// When `--account` is provided it is resolved via nickname or hash (same as
+/// `account summary`). When omitted, the primary account is used; if no
+/// primary is designated, the first account in the Schwab account list is used.
+/// Use `--all-accounts` to preserve the legacy cross-account listing behavior.
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
 
     let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
 
@@ -109,10 +124,18 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
         options = options.status(status);
     }
 
-    let orders: Vec<schwab::Order> = if let Some(account) = &args.account {
-        client.get_orders(account, options).await?
-    } else {
+    let orders: Vec<schwab::Order> = if args.all_accounts {
         client.get_all_orders(options).await?
+    } else {
+        let account_hash = match &args.account {
+            Some(selector) => {
+                crate::account::resolve_account(&token, selector)
+                    .await?
+                    .account_hash
+            }
+            None => crate::account::resolve_default_account_hash(&token).await?,
+        };
+        client.get_orders(&account_hash, options).await?
     };
 
     let count = orders.len();
@@ -260,11 +283,37 @@ mod tests {
             panic!("expected order list command");
         };
         assert!(args.account.is_none());
+        assert!(!args.all_accounts);
         assert!(args.status.is_none());
         assert!(args.from.is_none());
         assert!(args.to.is_none());
         assert!(!args.recent);
         assert!(args.max_results.is_none());
+    }
+
+    #[test]
+    fn parse_order_list_all_accounts() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "list", "--all-accounts"]);
+        let Command::Order(OrderCommand::List(args)) = cli.command else {
+            panic!("expected order list command");
+        };
+        assert!(args.account.is_none());
+        assert!(args.all_accounts);
+    }
+
+    #[test]
+    fn parse_order_list_rejects_account_with_all_accounts() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "list",
+                "--account",
+                "HASH123",
+                "--all-accounts"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -395,6 +444,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31".to_string()),
@@ -417,6 +467,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31T12:30:00Z".to_string()),
@@ -439,6 +490,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: None,
@@ -470,6 +522,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-06-01".to_string()),
             to: Some("2026-05-31".to_string()),

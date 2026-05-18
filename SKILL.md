@@ -263,15 +263,16 @@ schwab-agent stock place-raw --account HASH --json '{
 ## Order Lifecycle
 
 ```bash
-schwab-agent order list                                          # all accounts, last 60 days
-schwab-agent order list --account HASH --recent                  # single account, last 24h
+schwab-agent order list                                          # primary account, last 60 days
+schwab-agent order list --all-accounts                           # all linked accounts, last 60 days
+schwab-agent order list --account HASH --recent                  # selected account, last 24h
 schwab-agent order list --account HASH --status WORKING --from 2025-01-01 --to 2025-01-31
 schwab-agent order get --account HASH 12345678                   # single order by ID
 schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
 schwab-agent order cancel --account HASH 12345678                # cancel + verify
 ```
 
-List flags: `--account` (optional), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}`.
+List flags: `--account` (optional hash or nickname), `--all-accounts` (explicit cross-account mode, conflicts with `--account`), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Without `--account` or `--all-accounts`, `order list` uses the primary account and falls back to the first account. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}`.
 
 ## Post-Action Verification
 
