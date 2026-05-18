@@ -604,6 +604,9 @@ pub enum OrderCommand {
     /// Builds the order from the strategy arguments and submits it.
     /// The order will be live immediately upon acceptance. Includes
     /// post-place verification via a follow-up GET.
+    #[command(
+        after_help = "Note: order place is for option strategies only. For equity (stock) orders, use `schwab-agent stock place buy|sell|sell-short|buy-to-cover`."
+    )]
     Place(OrderPlaceArgs),
 
     /// Place an order from a previously saved preview digest.
