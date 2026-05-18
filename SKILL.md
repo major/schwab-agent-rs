@@ -492,7 +492,7 @@ Analyze flags:
 | Flag | Description |
 |---|---|
 | `--interval INTERVAL` | Candle interval (same values as ta dashboard) |
-| `--points N` | Number of data points per indicator series (default: 20) |
+| `--points N` | Number of data points per indicator series (default: 1) |
 
 ## Output Format
 
