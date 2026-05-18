@@ -14,6 +14,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::AppError;
+use crate::raw;
 
 /// Verification state after a mutable order action.
 #[derive(Clone, Debug, Serialize)]
@@ -75,7 +76,13 @@ pub(crate) async fn verify_order(
 
     match client.get_order(account, id).await {
         Ok(order) => match serde_json::to_value(&order) {
-            Ok(value) => result_from_verified_order(id, action, location, submitted_order, value),
+            Ok(value) => result_from_verified_order(
+                id,
+                action,
+                location,
+                submitted_order,
+                raw::sanitize_order(value),
+            ),
             Err(e) => OrderActionResult {
                 action: action.to_string(),
                 order_id: Some(id),

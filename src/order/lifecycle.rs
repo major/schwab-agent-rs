@@ -13,7 +13,7 @@ use time::{Date, Month, OffsetDateTime, Time};
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
-
+use crate::raw;
 use crate::verify;
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
     };
 
     let count = orders.len();
-    let data: Value = serde_json::to_value(&orders)?;
+    let data = raw::sanitize_order(serde_json::to_value(&orders)?);
 
     Ok(serde_json::json!({
         "orders": data,
@@ -128,7 +128,7 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
 pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
     let order = client.get_order(&args.account, args.order_id).await?;
-    Ok(serde_json::to_value(&order)?)
+    Ok(raw::sanitize_order(serde_json::to_value(&order)?))
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
