@@ -26,7 +26,7 @@ pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value,
             let provider = auth::provider(cli)?;
             let client = provider.client().await?;
             let token = provider.token().await?;
-            let data = run_summary(
+            let data = run_summary_with_client(
                 &client,
                 &token,
                 args.include_positions(),
@@ -39,7 +39,7 @@ pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value,
         AccountCommand::Resolve(args) => {
             let provider = auth::provider(cli)?;
             let client = provider.client().await?;
-            let data = resolve_account(&client, &args.selector).await?;
+            let data = resolve_account_with_client(&client, &args.selector).await?;
             Ok(to_value(data)?)
         }
     }
@@ -156,6 +156,31 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 ///
 /// Returns an `AppError` when any Schwab API call fails.
 pub async fn run_summary(
+    bearer_token: &str,
+    with_positions: bool,
+    with_positions_only: bool,
+    position_fields: Option<&[&str]>,
+) -> Result<AccountSummaryData, AppError> {
+    let client = schwab::Client::new(schwab::Config::new().bearer_token(bearer_token));
+    run_summary_with_client(
+        &client,
+        bearer_token,
+        with_positions,
+        with_positions_only,
+        position_fields,
+    )
+    .await
+}
+
+/// Fetches account data using an existing Schwab client and raw token.
+///
+/// This internal variant lets command handlers reuse typed client endpoints for
+/// account metadata while preserving the public token-based API.
+///
+/// # Errors
+///
+/// Returns an `AppError` when any Schwab API call fails.
+pub(crate) async fn run_summary_with_client(
     client: &schwab::Client,
     bearer_token: &str,
     with_positions: bool,
@@ -599,7 +624,9 @@ fn find_hash_value(account_number: Option<&str>, hashes: &[AccountNumberHash]) -
 /// # Errors
 ///
 /// Returns an `AppError` when no accounts are found or when any Schwab API call fails.
-pub async fn resolve_default_account_hash(client: &schwab::Client) -> Result<String, AppError> {
+pub(crate) async fn resolve_default_account_hash(
+    client: &schwab::Client,
+) -> Result<String, AppError> {
     let hashes = client.get_account_numbers().await?;
     let preferences = client.get_user_preference().await?;
     let prefs = preferences
@@ -647,6 +674,23 @@ pub(crate) fn resolve_default_account_hash_from_data(
 /// nickname selector matches more than one account. Schwab API failures also
 /// return an `AppError`.
 pub async fn resolve_account(
+    bearer_token: &str,
+    selector: &str,
+) -> Result<AccountResolveData, AppError> {
+    let client = schwab::Client::new(schwab::Config::new().bearer_token(bearer_token));
+    resolve_account_with_client(&client, selector).await
+}
+
+/// Resolves an account selector using an existing Schwab client.
+///
+/// This internal variant lets command handlers reuse typed client endpoints
+/// while preserving the public token-based API.
+///
+/// # Errors
+///
+/// Returns an `AppError` when the selector cannot be resolved or when any
+/// Schwab API call fails.
+pub(crate) async fn resolve_account_with_client(
     client: &schwab::Client,
     selector: &str,
 ) -> Result<AccountResolveData, AppError> {

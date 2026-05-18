@@ -24,7 +24,8 @@ use crate::verify;
 ///
 /// `--account` accepts a raw account hash or a nickname (same resolution as
 /// `account summary`). When omitted, the primary account is used; if no
-/// primary is set, the first account is used.
+/// primary is set, the first account is used. Use `--all-accounts` to query
+/// every linked account instead.
 ///
 /// By default, lists orders entered in the last 60 days. Use `--recent` for
 /// the last 24 hours, or `--from`/`--to` for a custom range. Pass `--status`
@@ -32,8 +33,12 @@ use crate::verify;
 #[derive(Debug, Args)]
 pub struct OrderListArgs {
     /// Account hash or nickname. Defaults to the primary account when omitted.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "all_accounts")]
     pub account: Option<String>,
+
+    /// Query orders across all linked accounts instead of resolving one account.
+    #[arg(long, conflicts_with = "account")]
+    pub all_accounts: bool,
 
     /// Filter by order status (e.g. WORKING, FILLED, CANCELED).
     #[arg(long)]
@@ -103,6 +108,7 @@ enum RangeBoundary {
 /// When `--account` is provided it is resolved via nickname or hash (same as
 /// `account summary`). When omitted, the primary account is used; if no
 /// primary is designated, the first account in the Schwab account list is used.
+/// Use `--all-accounts` to preserve the legacy cross-account listing behavior.
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
     let provider = auth::provider(cli)?;
     let client = provider.client().await?;
@@ -117,16 +123,20 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
         options = options.status(status);
     }
 
-    let account_hash = match &args.account {
-        Some(selector) => {
-            crate::account::resolve_account(&client, selector)
-                .await?
-                .account_hash
-        }
-        None => crate::account::resolve_default_account_hash(&client).await?,
+    let orders: Vec<schwab::Order> = if args.all_accounts {
+        client.get_all_orders(options).await?
+    } else {
+        let account_hash = match &args.account {
+            Some(selector) => {
+                crate::account::resolve_account_with_client(&client, selector)
+                    .await?
+                    .account_hash
+            }
+            None => crate::account::resolve_default_account_hash(&client).await?,
+        };
+        client.get_orders(&account_hash, options).await?
     };
 
-    let orders: Vec<schwab::Order> = client.get_orders(&account_hash, options).await?;
     let count = orders.len();
     let data: Value = serde_json::to_value(&orders)?;
 
@@ -272,11 +282,37 @@ mod tests {
             panic!("expected order list command");
         };
         assert!(args.account.is_none());
+        assert!(!args.all_accounts);
         assert!(args.status.is_none());
         assert!(args.from.is_none());
         assert!(args.to.is_none());
         assert!(!args.recent);
         assert!(args.max_results.is_none());
+    }
+
+    #[test]
+    fn parse_order_list_all_accounts() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "list", "--all-accounts"]);
+        let Command::Order(OrderCommand::List(args)) = cli.command else {
+            panic!("expected order list command");
+        };
+        assert!(args.account.is_none());
+        assert!(args.all_accounts);
+    }
+
+    #[test]
+    fn parse_order_list_rejects_account_with_all_accounts() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "list",
+                "--account",
+                "HASH123",
+                "--all-accounts"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -407,6 +443,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31".to_string()),
@@ -429,6 +466,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31T12:30:00Z".to_string()),
@@ -451,6 +489,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-05-28".to_string()),
             to: None,
@@ -482,6 +521,7 @@ mod tests {
         .unwrap();
         let args = OrderListArgs {
             account: None,
+            all_accounts: false,
             status: None,
             from: Some("2026-06-01".to_string()),
             to: Some("2026-05-31".to_string()),
