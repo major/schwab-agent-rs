@@ -591,6 +591,50 @@ fn find_hash_value(account_number: Option<&str>, hashes: &[AccountNumberHash]) -
         .and_then(|h| h.hash_value.clone())
 }
 
+/// Resolves the hash for the default account.
+///
+/// Returns the hash of the account marked as primary (`primary_account == true`),
+/// falling back to the first account when no primary is designated.
+///
+/// # Errors
+///
+/// Returns an `AppError` when no accounts are found or when any Schwab API call fails.
+pub async fn resolve_default_account_hash(client: &schwab::Client) -> Result<String, AppError> {
+    let hashes = client.get_account_numbers().await?;
+    let preferences = client.get_user_preference().await?;
+    let prefs = preferences
+        .into_iter()
+        .filter_map(|p| p.accounts)
+        .flatten()
+        .collect::<Vec<_>>();
+    resolve_default_account_hash_from_data(&hashes, &prefs)
+}
+
+/// Resolves the default account hash from pre-fetched data.
+///
+/// Pure helper: prefers the account marked as `primary_account == true`,
+/// falls back to the first account in the hash list.
+///
+/// # Errors
+///
+/// Returns `AppError::AccountValidation` when no accounts are available.
+pub(crate) fn resolve_default_account_hash_from_data(
+    hashes: &[AccountNumberHash],
+    prefs: &[UserPreferenceAccount],
+) -> Result<String, AppError> {
+    let rows = joined_account_rows(hashes, prefs);
+
+    // Primary account wins; first account is the fallback.
+    if let Some(row) = rows.iter().find(|r| r.primary_account == Some(true)) {
+        return Ok(row.account_hash.clone());
+    }
+
+    rows.into_iter()
+        .next()
+        .map(|r| r.account_hash)
+        .ok_or_else(|| AppError::AccountValidation("no accounts found".to_string()))
+}
+
 /// Resolves an account selector to the canonical Schwab account hash.
 ///
 /// Exact hash matches take precedence over exact nickname matches. Raw account

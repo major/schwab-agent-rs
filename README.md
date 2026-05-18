@@ -189,6 +189,8 @@ Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 All mutable order actions (place, place-from-preview, place-raw, replace, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
 
+`order list` accepts `--account` as a raw hash or a nickname (same resolution as `account summary`). When `--account` is omitted, the primary account is used automatically; if no primary account is designated, the first account in the list is used.
+
 `order list --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`.
 
 ## Testing

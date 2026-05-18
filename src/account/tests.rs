@@ -2,7 +2,7 @@ use crate::account::{
     AccountBalances, AccountResolveData, AccountRow, AccountSummaryData, CashBalanceSummary,
     DEFAULT_POSITION_FIELDS, MarginBalanceSummary, available_position_fields, build_account_row,
     canonical_position_field, render_summary_from_data, resolve_account_from_data,
-    selected_position_fields,
+    resolve_default_account_hash_from_data, selected_position_fields,
 };
 use crate::error::AppError;
 use schwab::{AccountEquity, AccountsInstrument, InstrumentAssetType};
@@ -382,6 +382,84 @@ fn account_resolve_ambiguous_nickname_returns_compact_validation_error() {
     assert!(message.contains("Trading (***2222)"));
     assert!(!message.contains("A1"));
     assert!(!message.contains("A2"));
+}
+
+// ---------------------------------------------------------------------------
+// resolve_default_account_hash_from_data tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn default_account_returns_primary_when_designated() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Cash"), Some("***1111"), false, "CASH"),
+        make_pref("A2", Some("Margin"), Some("***2222"), true, "MARGIN"),
+    ];
+
+    let hash = resolve_default_account_hash_from_data(&hashes, &prefs).unwrap();
+
+    // HASH2 is primary even though HASH1 appears first in the list.
+    assert_eq!(hash, "HASH2");
+}
+
+#[test]
+fn default_account_falls_back_to_first_when_no_primary() {
+    let hashes = [make_hash("A1", "HASH1"), make_hash("A2", "HASH2")];
+    let prefs = [
+        make_pref("A1", Some("Cash"), Some("***1111"), false, "CASH"),
+        make_pref("A2", Some("Margin"), Some("***2222"), false, "MARGIN"),
+    ];
+
+    let hash = resolve_default_account_hash_from_data(&hashes, &prefs).unwrap();
+
+    assert_eq!(hash, "HASH1");
+}
+
+#[test]
+fn default_account_returns_only_account_when_single() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs = [make_pref(
+        "A1",
+        Some("Solo"),
+        Some("***1111"),
+        false,
+        "CASH",
+    )];
+
+    let hash = resolve_default_account_hash_from_data(&hashes, &prefs).unwrap();
+
+    assert_eq!(hash, "HASH1");
+}
+
+#[test]
+fn default_account_returns_error_when_no_accounts() {
+    let hashes: Vec<schwab::AccountNumberHash> = vec![];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+
+    let err = resolve_default_account_hash_from_data(&hashes, &prefs).unwrap_err();
+
+    assert!(matches!(err, AppError::AccountValidation(_)));
+    assert!(err.to_string().contains("no accounts found"));
+}
+
+#[test]
+fn default_account_skips_hashes_without_hash_value() {
+    // A hash entry with no hash_value should be skipped; the second entry becomes first.
+    let hashes = [
+        schwab::AccountNumberHash {
+            account_number: Some("A1".to_string()),
+            hash_value: None,
+        },
+        make_hash("A2", "HASH2"),
+    ];
+    let prefs = [
+        make_pref("A1", Some("Broken"), Some("***1111"), false, "CASH"),
+        make_pref("A2", Some("Good"), Some("***2222"), false, "MARGIN"),
+    ];
+
+    let hash = resolve_default_account_hash_from_data(&hashes, &prefs).unwrap();
+
+    assert_eq!(hash, "HASH2");
 }
 
 // ---------------------------------------------------------------------------

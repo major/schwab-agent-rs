@@ -20,15 +20,18 @@ use crate::verify;
 // CLI argument structs
 // ---------------------------------------------------------------------------
 
-/// List orders for an account, or all linked accounts if `--account` is
-/// omitted.
+/// List orders for an account, defaulting to the primary account when omitted.
+///
+/// `--account` accepts a raw account hash or a nickname (same resolution as
+/// `account summary`). When omitted, the primary account is used; if no
+/// primary is set, the first account is used.
 ///
 /// By default, lists orders entered in the last 60 days. Use `--recent` for
 /// the last 24 hours, or `--from`/`--to` for a custom range. Pass `--status`
 /// to filter by a specific order status (e.g., WORKING, FILLED, CANCELED).
 #[derive(Debug, Args)]
 pub struct OrderListArgs {
-    /// Account hash. If omitted, returns orders for all linked accounts.
+    /// Account hash or nickname. Defaults to the primary account when omitted.
     #[arg(long)]
     pub account: Option<String>,
 
@@ -95,9 +98,14 @@ enum RangeBoundary {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// Lists orders, optionally filtered by account, status, and time range.
+/// Lists orders filtered by account, status, and time range.
+///
+/// When `--account` is provided it is resolved via nickname or hash (same as
+/// `account summary`). When omitted, the primary account is used; if no
+/// primary is designated, the first account in the Schwab account list is used.
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
 
     let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
 
@@ -109,12 +117,16 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
         options = options.status(status);
     }
 
-    let orders: Vec<schwab::Order> = if let Some(account) = &args.account {
-        client.get_orders(account, options).await?
-    } else {
-        client.get_all_orders(options).await?
+    let account_hash = match &args.account {
+        Some(selector) => {
+            crate::account::resolve_account(&client, selector)
+                .await?
+                .account_hash
+        }
+        None => crate::account::resolve_default_account_hash(&client).await?,
     };
 
+    let orders: Vec<schwab::Order> = client.get_orders(&account_hash, options).await?;
     let count = orders.len();
     let data: Value = serde_json::to_value(&orders)?;
 

@@ -125,7 +125,7 @@ The verification module (`src/verify.rs`) provides:
 
 `order list`, `order get`, `order replace`, and `order cancel` manage existing orders.
 
-- **list**: All orders or per-account, with status filtering, date range, and `--recent` (24h lookback). Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days.
+- **list**: All orders or per-account, with status filtering, date range, and `--recent` (24h lookback). `--account` accepts a raw hash or a nickname (same resolution as `account summary`); when omitted, the primary account is used (falls back to first account). Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days.
 - **get**: Single order by ID (positional arg), requires `--account`.
 - **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
 - **cancel**: Cancel by order ID (positive positional arg), requires `--account`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
