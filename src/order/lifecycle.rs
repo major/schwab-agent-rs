@@ -13,7 +13,7 @@ use time::{Date, Month, OffsetDateTime, Time};
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
-
+use crate::raw;
 use crate::verify;
 
 // ---------------------------------------------------------------------------
@@ -112,6 +112,7 @@ enum RangeBoundary {
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
     let provider = auth::provider(cli)?;
     let client = provider.client().await?;
+    let token = provider.token().await?;
 
     let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
 
@@ -128,17 +129,17 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
     } else {
         let account_hash = match &args.account {
             Some(selector) => {
-                crate::account::resolve_account_with_client(&client, selector)
+                crate::account::resolve_account(&token, selector)
                     .await?
                     .account_hash
             }
-            None => crate::account::resolve_default_account_hash(&client).await?,
+            None => crate::account::resolve_default_account_hash(&token).await?,
         };
         client.get_orders(&account_hash, options).await?
     };
 
     let count = orders.len();
-    let data: Value = serde_json::to_value(&orders)?;
+    let data = raw::sanitize_order(serde_json::to_value(&orders)?);
 
     Ok(serde_json::json!({
         "orders": data,
@@ -150,7 +151,7 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
 pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
     let client = auth::provider(cli)?.client().await?;
     let order = client.get_order(&args.account, args.order_id).await?;
-    Ok(serde_json::to_value(&order)?)
+    Ok(raw::sanitize_order(serde_json::to_value(&order)?))
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.

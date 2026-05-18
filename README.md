@@ -172,7 +172,7 @@ schwab-agent analyze AAPL MSFT GOOG SPY      # multiple symbols
 schwab-agent analyze AAPL --interval weekly --points 10
 ```
 
-Returns quote + TA dashboard for each symbol. Partial failures include per-symbol error fields (`quote_error`, `analysis_error`) alongside successful results.
+Returns quote + TA dashboard for each symbol. Partial failures include per-symbol error fields (`quote_error`, `analysis_error`) alongside successful results. The default `--points 1` returns only the latest indicator values, which is sufficient for agent decision-making and reduces token usage by ~88% compared to the historical 20-point default. Use `--points N` when you need a time series for trend analysis.
 
 ## Order Workflow
 
