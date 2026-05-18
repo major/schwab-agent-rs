@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-05-18
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Resolve nicknames and default to primary account in order list
+- *(order)* Restore all-account listing opt-in
+- *(deps)* Update schwab to 0.2.2
+- *(ta)* Round TA output values to 2 decimal places
+
+### <!-- 7 -->⚙️ Miscellaneous
+
+- Switch from dtolnay/rust-toolchain to actions-rust-lang/setup-rust-toolchain
+
+
 ## [0.2.2] - 2026-05-17
 
 ### <!-- 1 -->🐛 Bug Fixes
