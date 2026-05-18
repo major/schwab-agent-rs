@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-05-18
+
+### <!-- 7 -->⚙️ Miscellaneous
+
+- Update Cargo.lock dependencies
+
+
 ## [0.3.0] - 2026-05-18
 
 ### <!-- 1 -->🐛 Bug Fixes
