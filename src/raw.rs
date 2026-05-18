@@ -195,6 +195,65 @@ fn normalize_user_preference_response(value: Value) -> Value {
     }
 }
 
+/// Field names to remove from order API responses before output.
+///
+/// `accountNumber` is the raw numeric Schwab account number. It is a privacy
+/// risk when output is displayed, logged, or forwarded to external tools. The
+/// account hash is already present and sufficient for correlation.
+const REDACTED_ORDER_FIELDS: &[&str] = &["accountNumber"];
+
+/// Strips all `null`-valued keys from JSON objects, recursively.
+///
+/// Arrays are traversed element-by-element; array elements that are themselves
+/// `null` are kept (only object keys whose value is null are removed). All
+/// other scalar values are returned unchanged.
+///
+/// This reduces token overhead in order output by eliminating the ~16 null
+/// fields per order (e.g. `activationPrice`, `cancelTime`,
+/// `priceLinkBasis`) that the Schwab API includes when absent.
+#[must_use]
+pub(crate) fn strip_null_fields(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter(|(_, v)| !v.is_null())
+                .map(|(k, v)| (k, strip_null_fields(v)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(strip_null_fields).collect()),
+        other => other,
+    }
+}
+
+/// Removes privacy-sensitive fields from order JSON, recursively.
+///
+/// Currently removes `accountNumber` (the raw numeric account number). The
+/// account hash is already present in the response and is sufficient for
+/// identifying the account without exposing the raw number.
+#[must_use]
+pub(crate) fn redact_order_fields(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .filter(|(k, _)| !REDACTED_ORDER_FIELDS.contains(&k.as_str()))
+                .map(|(k, v)| (k, redact_order_fields(v)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(redact_order_fields).collect()),
+        other => other,
+    }
+}
+
+/// Sanitizes order API output: strips null fields and redacts sensitive fields.
+///
+/// Combines [`strip_null_fields`] and [`redact_order_fields`] in a single
+/// pipeline. Apply to any `Value` derived from a Schwab order API response
+/// before returning it to the caller.
+#[must_use]
+pub(crate) fn sanitize_order(value: Value) -> Value {
+    redact_order_fields(strip_null_fields(value))
+}
+
 /// Known boolean field names in the Schwab API response (camelCase).
 ///
 /// These keys carry legitimate `false` values and must not be converted to
@@ -354,6 +413,117 @@ mod tests {
     fn normalize_empty_structures() {
         assert_eq!(normalize_false_to_null(json!({})), json!({}));
         assert_eq!(normalize_false_to_null(json!([])), json!([]));
+    }
+
+    // --- strip_null_fields ---
+
+    #[test]
+    fn strip_null_removes_null_keyed_fields() {
+        let input = json!({
+            "activationPrice": null,
+            "cancelTime": null,
+            "orderType": "LIMIT",
+            "price": 150.0
+        });
+        let result = strip_null_fields(input);
+        assert!(result.get("activationPrice").is_none());
+        assert!(result.get("cancelTime").is_none());
+        assert_eq!(result["orderType"], "LIMIT");
+        assert_eq!(result["price"], 150.0);
+    }
+
+    #[test]
+    fn strip_null_preserves_array_null_elements() {
+        // null elements inside arrays are kept; only object-key nulls are stripped
+        let input = json!([null, 1, "text"]);
+        assert_eq!(strip_null_fields(input), json!([null, 1, "text"]));
+    }
+
+    #[test]
+    fn strip_null_recurses_into_nested_objects() {
+        let input = json!({
+            "instrument": {
+                "symbol": "AAPL",
+                "maturityDate": null,
+                "optionDeliverables": null
+            }
+        });
+        let result = strip_null_fields(input);
+        let instrument = &result["instrument"];
+        assert_eq!(instrument["symbol"], "AAPL");
+        assert!(instrument.get("maturityDate").is_none());
+        assert!(instrument.get("optionDeliverables").is_none());
+    }
+
+    #[test]
+    fn strip_null_recurses_into_array_objects() {
+        let input = json!([
+            {"orderId": 1, "cancelTime": null},
+            {"orderId": 2, "cancelTime": null, "price": 5.0}
+        ]);
+        let result = strip_null_fields(input);
+        let arr = result.as_array().unwrap();
+        assert!(arr[0].get("cancelTime").is_none());
+        assert!(arr[1].get("cancelTime").is_none());
+        assert_eq!(arr[1]["price"], 5.0);
+    }
+
+    // --- redact_order_fields ---
+
+    #[test]
+    fn redact_removes_account_number() {
+        let input = json!({
+            "orderId": 12345,
+            "accountNumber": "123456789",
+            "status": "WORKING"
+        });
+        let result = redact_order_fields(input);
+        assert!(result.get("accountNumber").is_none());
+        assert_eq!(result["orderId"], 12345);
+        assert_eq!(result["status"], "WORKING");
+    }
+
+    #[test]
+    fn redact_recurses_into_nested_structures() {
+        let input = json!([
+            {"orderId": 1, "accountNumber": "111", "orderLegCollection": [{"accountNumber": "111"}]},
+            {"orderId": 2, "accountNumber": "222"}
+        ]);
+        let result = redact_order_fields(input);
+        let arr = result.as_array().unwrap();
+        assert!(arr[0].get("accountNumber").is_none());
+        assert!(arr[1].get("accountNumber").is_none());
+        // Nested inside orderLegCollection
+        assert!(
+            arr[0]["orderLegCollection"][0]
+                .get("accountNumber")
+                .is_none()
+        );
+    }
+
+    // --- sanitize_order ---
+
+    #[test]
+    fn sanitize_order_strips_nulls_and_redacts_account_number() {
+        let input = json!({
+            "orderId": 42,
+            "accountNumber": "987654321",
+            "activationPrice": null,
+            "price": 200.0,
+            "instrument": {
+                "symbol": "AAPL",
+                "maturityDate": null,
+                "variableRate": null
+            }
+        });
+        let result = sanitize_order(input);
+        assert!(result.get("accountNumber").is_none());
+        assert!(result.get("activationPrice").is_none());
+        assert_eq!(result["orderId"], 42);
+        assert_eq!(result["price"], 200.0);
+        assert_eq!(result["instrument"]["symbol"], "AAPL");
+        assert!(result["instrument"].get("maturityDate").is_none());
+        assert!(result["instrument"].get("variableRate").is_none());
     }
 
     // --- full pipeline ---
