@@ -270,9 +270,18 @@ fn assemble_output(
                 args.points,
                 "avg_volume_20",
             )?,
-            relative_volume,
+            relative_volume: relative_volume.map(round2),
         },
-        derived,
+        derived: DerivedFields {
+            atr_percent: round2(derived.atr_percent),
+            range_20_high: round2(derived.range_20_high),
+            range_20_low: round2(derived.range_20_low),
+            range_252_high: round2(derived.range_252_high),
+            range_252_low: round2(derived.range_252_low),
+            distance_from_sma_21: round2(derived.distance_from_sma_21),
+            distance_from_sma_50: round2(derived.distance_from_sma_50),
+            distance_from_sma_200: round2(derived.distance_from_sma_200),
+        },
         signals,
     })
 }
@@ -372,7 +381,7 @@ fn align_simple_points(
         .skip(skip)
         .map(|(value, timestamp)| TaPoint {
             timestamp: *timestamp,
-            value: *value,
+            value: round2(*value),
         })
         .collect())
 }
@@ -402,9 +411,9 @@ fn align_macd_points(
         .skip(skip)
         .map(|(((macd, signal), histogram), timestamp)| MacdPoint {
             timestamp: *timestamp,
-            macd: *macd,
-            signal: *signal,
-            histogram: *histogram,
+            macd: round2(*macd),
+            signal: round2(*signal),
+            histogram: round2(*histogram),
         })
         .collect())
 }
@@ -430,9 +439,9 @@ fn align_bbands_points(
         .skip(skip)
         .map(|(((upper, middle), lower), timestamp)| BbandsPoint {
             timestamp: *timestamp,
-            upper: *upper,
-            middle: *middle,
-            lower: *lower,
+            upper: round2(*upper),
+            middle: round2(*middle),
+            lower: round2(*lower),
         })
         .collect())
 }
@@ -455,8 +464,8 @@ fn align_stoch_points(
         .skip(skip)
         .map(|((k, d), timestamp)| StochPoint {
             timestamp: *timestamp,
-            k: *k,
-            d: *d,
+            k: round2(*k),
+            d: round2(*d),
         })
         .collect())
 }
@@ -486,11 +495,17 @@ fn align_adx_points(
         .skip(skip)
         .map(|(((adx, plus_di), minus_di), timestamp)| AdxPoint {
             timestamp: *timestamp,
-            adx: *adx,
-            plus_di: *plus_di,
-            minus_di: *minus_di,
+            adx: round2(*adx),
+            plus_di: round2(*plus_di),
+            minus_di: round2(*minus_di),
         })
         .collect())
+}
+
+/// Round a float to 2 decimal places to eliminate floating-point noise in output.
+#[must_use]
+fn round2(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
 }
 
 fn ensure_alignable(
