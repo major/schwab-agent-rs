@@ -140,7 +140,7 @@ pub struct AnalyzeArgs {
     #[arg(long, default_value = "daily")]
     pub interval: String,
     /// Number of data points to return per indicator series.
-    #[arg(long, default_value = "20")]
+    #[arg(long, default_value = "1")]
     pub points: usize,
 }
 
@@ -925,7 +925,7 @@ mod tests {
         };
         assert_eq!(args.symbols, ["AAPL", "MSFT"]);
         assert_eq!(args.interval, "daily");
-        assert_eq!(args.points, 20);
+        assert_eq!(args.points, 1);
     }
 
     #[test]
