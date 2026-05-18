@@ -113,6 +113,8 @@ Position output with `--positions` is token-optimized by default, returning `col
 
 Equity order workflow with four actions: `buy`, `sell`, `sell-short`, `buy-to-cover`.
 
+Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
+
 Subcommands: `build`, `preview`, `place`, `place-from-preview`, `preview-raw`, `place-raw`.
 
 Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal.
@@ -135,6 +137,7 @@ Lifecycle commands (`list`, `get`, `replace`, `cancel`) manage existing orders. 
 
 ```bash
 schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
+schwab-agent order cancel --account HASH --order-id 12345678
 ```
 
 ### option
@@ -192,6 +195,8 @@ All mutable order actions (place, place-from-preview, place-raw, replace, cancel
 `order list` accepts `--account` as a raw hash or a nickname (same resolution as `account summary`). When `--account` is omitted, the primary account is used automatically; if no primary account is designated, the first account in the list is used. Use `--all-accounts` to query every linked account instead; it conflicts with `--account` so a command cannot mix single-account and cross-account modes.
 
 `order list --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`.
+
+`order cancel` accepts the order ID either positionally (`order cancel --account HASH 12345678`) or as `--order-id 12345678`.
 
 ## Testing
 

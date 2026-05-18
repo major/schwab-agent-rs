@@ -76,6 +76,8 @@ The `--account` flag on stock and order commands accepts either the canonical ac
 
 Buy/sell shares of stock. Recommended LLM workflow: `preview --save-preview` -> `place-from-preview` (same digest/TTL system as option orders).
 
+Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
+
 Prefer limit orders when practical: pass `--price` for limit orders. Omit `--price` only when a market order is explicitly desired.
 
 ### Buy / Sell
@@ -270,6 +272,7 @@ schwab-agent order list --account HASH --status WORKING --from 2025-01-01 --to 2
 schwab-agent order get --account HASH 12345678                   # single order by ID
 schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
 schwab-agent order cancel --account HASH 12345678                # cancel + verify
+schwab-agent order cancel --account HASH --order-id 12345678     # equivalent named-flag form
 ```
 
 List flags: `--account` (optional hash or nickname), `--all-accounts` (explicit cross-account mode, conflicts with `--account`), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Without `--account` or `--all-accounts`, `order list` uses the primary account and falls back to the first account. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}`.

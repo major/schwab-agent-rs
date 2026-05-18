@@ -84,6 +84,8 @@ src/
 
 buy, sell, sell-short, buy-to-cover
 
+Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
+
 Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. Supports order types: market (default), limit, stop, stop-limit.
 
 `preview-raw` and `place-raw` accept arbitrary JSON payloads for complex order types (bracket, OCO, triggered orders) that use recursive `childOrderStrategies`.
@@ -128,7 +130,7 @@ The verification module (`src/verify.rs`) provides:
 - **list**: Per-account order listing with status filtering, date range, and `--recent` (24h lookback). `--account` accepts a raw hash or a nickname (same resolution as `account summary`); when omitted, the primary account is used (falls back to first account). Use `--all-accounts` to opt into querying every linked account; it conflicts with `--account`. Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days.
 - **get**: Single order by ID (positional arg), requires `--account`.
 - **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
-- **cancel**: Cancel by order ID (positive positional arg), requires `--account`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
+- **cancel**: Cancel by order ID, requires `--account`. The order ID can be passed positionally or with `--order-id`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 
 ### Option Data Subcommands (4 total)
 

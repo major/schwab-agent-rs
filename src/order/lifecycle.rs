@@ -86,8 +86,30 @@ pub struct OrderCancelArgs {
     pub account: String,
 
     /// Order ID to cancel.
-    #[arg(value_parser = clap::value_parser!(i64).range(1..))]
-    pub order_id: i64,
+    #[arg(
+        value_parser = clap::value_parser!(i64).range(1..),
+        required_unless_present = "order_id_flag"
+    )]
+    pub order_id: Option<i64>,
+
+    /// Order ID to cancel.
+    #[arg(
+        long = "order-id",
+        value_name = "ORDER_ID",
+        value_parser = clap::value_parser!(i64).range(1..),
+        conflicts_with = "order_id"
+    )]
+    pub order_id_flag: Option<i64>,
+}
+
+impl OrderCancelArgs {
+    /// Returns the order ID supplied either positionally or via `--order-id`.
+    #[must_use]
+    pub fn order_id(&self) -> i64 {
+        self.order_id
+            .or(self.order_id_flag)
+            .expect("clap requires order_id or order_id_flag")
+    }
 }
 
 /// Which side of a date range is being normalized.
@@ -158,17 +180,11 @@ pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, 
 pub(crate) async fn handle_cancel(cli: &Cli, args: &OrderCancelArgs) -> Result<Value, AppError> {
     crate::config::require_mutable_enabled()?;
     let client = auth::provider(cli)?.client().await?;
-    client.cancel_order(&args.account, args.order_id).await?;
+    let order_id = args.order_id();
+    client.cancel_order(&args.account, order_id).await?;
 
-    let result = verify::verify_order(
-        &client,
-        &args.account,
-        Some(args.order_id),
-        "cancel",
-        None,
-        None,
-    )
-    .await;
+    let result =
+        verify::verify_order(&client, &args.account, Some(order_id), "cancel", None, None).await;
 
     verify::action_value(result)
 }
@@ -403,7 +419,50 @@ mod tests {
             panic!("expected order cancel command");
         };
         assert_eq!(args.account, "HASH123");
-        assert_eq!(args.order_id, 67890);
+        assert_eq!(args.order_id(), 67890);
+    }
+
+    #[test]
+    fn parse_order_cancel_with_order_id_flag() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "cancel",
+            "--account",
+            "HASH123",
+            "--order-id",
+            "67890",
+        ]);
+        let Command::Order(OrderCommand::Cancel(args)) = cli.command else {
+            panic!("expected order cancel command");
+        };
+        assert_eq!(args.account, "HASH123");
+        assert_eq!(args.order_id(), 67890);
+    }
+
+    #[test]
+    fn parse_order_cancel_rejects_missing_order_id() {
+        assert!(
+            Cli::try_parse_from(["schwab-agent", "order", "cancel", "--account", "HASH123"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_order_cancel_rejects_duplicate_order_ids() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "cancel",
+                "--account",
+                "HASH123",
+                "67890",
+                "--order-id",
+                "12345",
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -430,6 +489,18 @@ mod tests {
                 "--account",
                 "HASH123",
                 "-1"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "cancel",
+                "--account",
+                "HASH123",
+                "--order-id",
+                "0"
             ])
             .is_err()
         );

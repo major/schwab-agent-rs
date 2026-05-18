@@ -530,6 +530,19 @@ mod tests {
     }
 
     #[test]
+    fn order_place_help_points_equities_to_stock_place() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("order")
+            .and_then(|order| order.find_subcommand_mut("place"))
+            .map(|place| place.render_long_help().to_string())
+            .expect("order place command exists");
+
+        assert!(help.contains("order place is for option strategies only"));
+        assert!(help.contains("schwab-agent stock place"));
+    }
+
+    #[test]
     fn command_name_auth_status() {
         let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
         assert_eq!(cli.command_name(), "auth.status");
