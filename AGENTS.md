@@ -24,7 +24,7 @@ src/
   output.rs        - ErrorBody struct for structured error JSON output
   shared.rs        - Shared types: SessionChoice, DurationChoice, to_number() helper
   config.rs        - Agent config: load shared config, mutable-operation guard
-  raw.rs           - Raw Schwab API requests with response normalization (object unwrap, false→null)
+  raw.rs           - Raw Schwab API requests with response normalization (account endpoint envelopes, false→null)
   error/
     mod.rs         - AppError enum (thiserror) with stable codes, exit codes, categories, hints
     tests.rs       - Error module tests

@@ -24,10 +24,8 @@ pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value,
                 Some(selected_position_fields(args.fields.as_deref())?)
             };
             let provider = auth::provider(cli)?;
-            let client = provider.client().await?;
             let token = provider.token().await?;
             let data = run_summary(
-                &client,
                 &token,
                 args.include_positions(),
                 args.with_positions_only,
@@ -38,8 +36,8 @@ pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value,
         }
         AccountCommand::Resolve(args) => {
             let provider = auth::provider(cli)?;
-            let client = provider.client().await?;
-            let data = resolve_account(&client, &args.selector).await?;
+            let token = provider.token().await?;
+            let data = resolve_account(&token, &args.selector).await?;
             Ok(to_value(data)?)
         }
     }
@@ -156,7 +154,6 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 ///
 /// Returns an `AppError` when any Schwab API call fails.
 pub async fn run_summary(
-    client: &schwab::Client,
     bearer_token: &str,
     with_positions: bool,
     with_positions_only: bool,
@@ -165,8 +162,8 @@ pub async fn run_summary(
     // Filtering by positions requires fetching them.
     let effective_positions = with_positions || with_positions_only;
 
-    let hashes = client.get_account_numbers().await?;
-    let preferences = client.get_user_preference().await?;
+    let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
+    let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
     let prefs: Vec<UserPreferenceAccount> = preferences
         .into_iter()
         .filter_map(|preference| preference.accounts)
@@ -603,11 +600,11 @@ fn find_hash_value(account_number: Option<&str>, hashes: &[AccountNumberHash]) -
 /// nickname selector matches more than one account. Schwab API failures also
 /// return an `AppError`.
 pub async fn resolve_account(
-    client: &schwab::Client,
+    bearer_token: &str,
     selector: &str,
 ) -> Result<AccountResolveData, AppError> {
-    let hashes = client.get_account_numbers().await?;
-    let preferences = client.get_user_preference().await?;
+    let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
+    let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
     let prefs = preferences
         .into_iter()
         .filter_map(|preference| preference.accounts)
