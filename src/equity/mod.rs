@@ -363,8 +363,10 @@ async fn do_preview(
     command_name: &str,
 ) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
-    let client = auth::provider(cli)?.client().await?;
-    let resolved = account::resolve_account(&client, account).await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
+    let resolved = account::resolve_account(&token, account).await?;
     let account_hash = resolved.account_hash;
     let _preview = client.preview_order(&account_hash, &order).await?;
 
@@ -387,8 +389,10 @@ async fn do_preview(
 /// Places the order directly via the Schwab API with post-place verification.
 async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
-    let client = auth::provider(cli)?.client().await?;
-    let resolved = account::resolve_account(&client, account).await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
+    let resolved = account::resolve_account(&token, account).await?;
     let account_hash = resolved.account_hash;
     let response = client.place_order(&account_hash, &order).await?;
     let order_json = serialize_order(&order)?;
@@ -409,8 +413,10 @@ async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Val
 /// Places an order from a previously saved preview digest with post-place
 /// verification.
 async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
-    let resolved = account::resolve_account(&client, account).await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
+    let resolved = account::resolve_account(&token, account).await?;
     let account_hash = resolved.account_hash;
     let saved = preview::load_preview(digest, &account_hash)?;
     let response = client.place_order(&account_hash, &saved.order).await?;
@@ -449,8 +455,10 @@ async fn do_preview_raw(
     save: bool,
 ) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
-    let client = auth::provider(cli)?.client().await?;
-    let resolved = account::resolve_account(&client, account).await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
+    let resolved = account::resolve_account(&token, account).await?;
     let account_hash = resolved.account_hash;
     let _preview = client.preview_order(&account_hash, &order).await?;
 
@@ -472,8 +480,10 @@ async fn do_preview_raw(
 /// verification.
 async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
-    let client = auth::provider(cli)?.client().await?;
-    let resolved = account::resolve_account(&client, account).await?;
+    let provider = auth::provider(cli)?;
+    let client = provider.client().await?;
+    let token = provider.token().await?;
+    let resolved = account::resolve_account(&token, account).await?;
     let account_hash = resolved.account_hash;
     let response = client.place_order(&account_hash, &order).await?;
 
