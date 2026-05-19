@@ -61,7 +61,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, cancel) are
 }
 ```
 
-This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, list, get, quote, etc.) are not affected.
+This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, get, quote, etc.) are not affected.
 
 ## Command Groups
 
@@ -131,13 +131,17 @@ schwab-agent stock place-from-preview --account HASH_OR_NICKNAME --digest DIGEST
 
 Option order workflow supporting 15 named strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`, `call-debit-spread`, `call-credit-spread`, `put-debit-spread`, `put-credit-spread`, `long-straddle`, `short-straddle`, `long-strangle`, `short-strangle`, `short-iron-condor`, `jade-lizard`.
 
-Subcommands: `build`, `preview`, `place`, `place-from-preview`, `replace`, `list`, `get`, `cancel`.
+Subcommands: `build`, `preview`, `place`, `place-from-preview`, `replace`, `get`, `cancel`.
 
 Each strategy hardcodes contract type and direction to prevent accidental trade reversal.
 
-Lifecycle commands (`list`, `get`, `replace`, `cancel`) manage existing orders. `order list` resolves a single account by default; pass `--all-accounts` when you explicitly want the legacy cross-account listing. `replace` builds a new option strategy payload and submits it to Schwab's replace endpoint for an existing order ID.
+Lifecycle commands (`get`, `replace`, `cancel`) manage existing orders. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep orders whose returned status is not active, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` builds a new option strategy payload and submits it to Schwab's replace endpoint for an existing order ID.
 
 ```bash
+schwab-agent order get
+schwab-agent order get --account HASH_OR_NICKNAME --recent
+schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
+schwab-agent order get --account HASH_OR_NICKNAME --order 12345678
 schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
 schwab-agent order cancel --account HASH --order-id 12345678
 ```
@@ -194,9 +198,9 @@ Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 All mutable order actions (place, place-from-preview, place-raw, replace, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
 
-`order list` accepts `--account` as a raw hash or a nickname (same resolution as `account`). When `--account` is omitted, the primary account is used automatically; if no primary account is designated, the first account in the list is used. Use `--all-accounts` to query every linked account instead; it conflicts with `--account` so a command cannot mix single-account and cross-account modes. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break listing. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
+`order get` defaults to cross-account active-order discovery. Active orders are returned orders whose `status` exactly matches one of the strings in the `active_statuses` output field. Any other returned status is treated as inactive and is included only with `--include-inactive`. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break discovery. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
 
-`order list --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`.
+`order get --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`. Date filters, `--recent`, and `--include-inactive` are discovery-mode filters and cannot be combined with `--order`.
 
 `order cancel` accepts the order ID either positionally (`order cancel --account HASH 12345678`) or as `--order-id 12345678`.
 

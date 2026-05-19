@@ -19,7 +19,7 @@ This crate is published as `schwab-agent-rs`. Releases are automated on push to 
 
 ## Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, cancel) require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, list, get) are not gated.
+All mutable commands (place, place-from-preview, place-raw, replace, cancel) require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, get) are not gated.
 
 ## Auth
 
@@ -265,17 +265,17 @@ schwab-agent stock place-raw --account HASH --json '{
 ## Order Lifecycle
 
 ```bash
-schwab-agent order list                                          # primary account, last 60 days
-schwab-agent order list --all-accounts                           # all linked accounts, last 60 days
-schwab-agent order list --account HASH --recent                  # selected account, last 24h
-schwab-agent order list --account HASH --status WORKING --from 2025-01-01 --to 2025-01-31
-schwab-agent order get --account HASH 12345678                   # single order by ID
+schwab-agent order get                                           # active orders across all linked accounts
+schwab-agent order get --account HASH                            # active orders for one account
+schwab-agent order get --account HASH --recent                   # active orders for one account, last 24h
+schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
+schwab-agent order get --account HASH --order 12345678           # single order by ID
 schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
 schwab-agent order cancel --account HASH 12345678                # cancel + verify
 schwab-agent order cancel --account HASH --order-id 12345678     # equivalent named-flag form
 ```
 
-List flags: `--account` (optional hash or nickname), `--all-accounts` (explicit cross-account mode, conflicts with `--account`), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Without `--account` or `--all-accounts`, `order list` uses the primary account and falls back to the first account. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}` plus optional sanitized `warnings` when Schwab returns unrecognized order activity enum values. Canceled order activities are preserved and do not make listing fail.
+Get discovery flags: `--account` (optional hash or nickname), `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, and `--include-inactive`. Without `--account`, `order get` returns active orders across all linked accounts. With `--account`, it returns active orders for that account. Active means the returned `status` exactly matches one of the strings in the `active_statuses` output field; any other status is treated as inactive and kept only with `--include-inactive`. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N, "include_inactive": false, "active_statuses": [...]}` plus optional sanitized `warnings` when Schwab returns unrecognized order activity enum values. Canceled order activities are preserved and do not make discovery fail. Specific-order mode is `order get --account HASH --order ORDER_ID`; do not combine `--order` with discovery filters.
 
 ## Post-Action Verification
 

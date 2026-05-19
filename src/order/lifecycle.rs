@@ -1,4 +1,4 @@
-//! Order lifecycle commands: list, get, cancel.
+//! Order lifecycle commands: get, cancel.
 //!
 //! These commands let agents inspect and manage existing orders rather than
 //! only creating new ones. The cancel command includes post-action
@@ -16,63 +16,67 @@ use crate::error::AppError;
 use crate::raw;
 use crate::verify;
 
+/// Schwab order statuses treated as active/open by `order get` discovery mode.
+const ACTIVE_ORDER_STATUSES: &[&str] = &[
+    "AWAITING_PARENT_ORDER",
+    "AWAITING_CONDITION",
+    "AWAITING_STOP_CONDITION",
+    "AWAITING_MANUAL_REVIEW",
+    "AWAITING_UR_OUT",
+    "AWAITING_RELEASE_TIME",
+    "PENDING_ACTIVATION",
+    "PENDING_CANCEL",
+    "PENDING_REPLACE",
+    "PENDING_ACKNOWLEDGEMENT",
+    "PENDING_RECALL",
+    "QUEUED",
+    "WORKING",
+    "NEW",
+];
+
 // ---------------------------------------------------------------------------
 // CLI argument structs
 // ---------------------------------------------------------------------------
 
-/// List orders for an account, defaulting to the primary account when omitted.
+/// Retrieve active or all orders, or a single order by ID.
 ///
 /// `--account` accepts a raw account hash or a nickname (same resolution as
-/// `account`). When omitted, the primary account is used; if no
-/// primary is set, the first account is used. Use `--all-accounts` to query
-/// every linked account instead.
+/// `account`). When omitted, active orders are queried across all linked
+/// accounts. Add `--order` with `--account` to retrieve one exact order.
 ///
-/// By default, lists orders entered in the last 60 days. Use `--recent` for
-/// the last 24 hours, or `--from`/`--to` for a custom range. Pass `--status`
-/// to filter by a specific order status (e.g., WORKING, FILLED, CANCELED).
+/// Discovery mode fetches Schwab's order list without a status filter and then
+/// treats any returned status outside `ACTIVE_ORDER_STATUSES` as inactive. By
+/// default, it searches active orders entered in the last 60 days. Use
+/// `--include-inactive` to keep filled, canceled, rejected, replaced, expired,
+/// and any other non-active statuses. Use `--recent` for the last 24 hours, or
+/// `--from`/`--to` for a custom range.
 #[derive(Debug, Args)]
-pub struct OrderListArgs {
-    /// Account hash or nickname. Defaults to the primary account when omitted.
-    #[arg(long, conflicts_with = "all_accounts")]
+pub struct OrderGetArgs {
+    /// Account hash or nickname. Omit to query active orders across all accounts.
+    #[arg(long)]
     pub account: Option<String>,
 
-    /// Query orders across all linked accounts instead of resolving one account.
-    #[arg(long, conflicts_with = "account")]
-    pub all_accounts: bool,
-
-    /// Filter by order status (e.g. WORKING, FILLED, CANCELED).
-    #[arg(long)]
-    pub status: Option<String>,
+    /// Specific order ID to retrieve. Requires `--account`.
+    #[arg(long = "order", requires = "account", value_parser = clap::value_parser!(i64).range(1..))]
+    pub order_id: Option<i64>,
 
     /// Start of time range (YYYY-MM-DD or RFC3339, e.g. 2025-01-15).
     /// Defaults to 60 days ago.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "order_id")]
     pub from: Option<String>,
 
     /// End of time range (YYYY-MM-DD or RFC3339, e.g. 2025-06-15).
     /// Defaults to now.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "order_id")]
     pub to: Option<String>,
 
-    /// List orders from the last 24 hours. Overrides `--from`.
-    #[arg(long)]
+    /// Get active orders from the last 24 hours. Overrides `--from`.
+    #[arg(long, conflicts_with = "order_id")]
     pub recent: bool,
 
-    /// Maximum number of orders to return.
-    #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
-    pub max_results: Option<u32>,
-}
-
-/// Retrieve a single order by ID.
-#[derive(Debug, Args)]
-pub struct OrderGetArgs {
-    /// Account hash (required).
-    #[arg(long)]
-    pub account: String,
-
-    /// Order ID to retrieve.
-    #[arg(value_parser = clap::value_parser!(i64).range(1..))]
-    pub order_id: i64,
+    /// Include filled, canceled, rejected, replaced, expired, and other inactive orders.
+    #[arg(long, conflicts_with = "order_id")]
+    pub include_inactive: bool,
 }
 
 /// Cancel an order by ID, with post-cancel verification.
@@ -125,46 +129,65 @@ enum RangeBoundary {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// Lists orders filtered by account, status, and time range.
-///
-/// When `--account` is provided it is resolved via nickname or hash (same as
-/// `account`). When omitted, the primary account is used; if no
-/// primary is designated, the first account in the Schwab account list is used.
-/// Use `--all-accounts` to preserve the legacy cross-account listing behavior.
-pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
+/// Retrieves active/all orders or a single order by account and order ID.
+pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
     let provider = auth::provider(cli)?;
     let token = provider.token().await?;
 
-    let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
+    if let Some(order_id) = args.order_id {
+        let account = args
+            .account
+            .as_deref()
+            .expect("clap requires account when order is present");
+        let account_hash = crate::account::resolve_account(&token, account)
+            .await?
+            .account_hash;
+        let client = provider.client().await?;
+        let order = client.get_order(&account_hash, order_id).await?;
+        return Ok(raw::sanitize_order(serde_json::to_value(&order)?));
+    }
+
+    handle_get_orders(&token, args).await
+}
+
+/// Retrieves discovery-mode orders across all accounts or a selected account.
+async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Value, AppError> {
+    let (from_time, to_time) = normalize_get_range(args, OffsetDateTime::now_utc())?;
+    let account_hash = match &args.account {
+        Some(selector) => Some(
+            crate::account::resolve_account(bearer_token, selector)
+                .await?
+                .account_hash,
+        ),
+        None => None,
+    };
 
     let query = raw::OrderListQuery {
         from_entered_time: &from_time,
         to_entered_time: &to_time,
-        max_results: args.max_results,
-        status: args.status.as_deref(),
+        max_results: None,
+        status: None,
+    };
+    let raw_orders = raw::fetch_order_list(bearer_token, account_hash.as_deref(), &query).await?;
+    let normalized = raw::normalize_order_list_response(raw_orders);
+    let mut orders = match normalized {
+        Value::Array(items) => items,
+        other => vec![other],
     };
 
-    let raw_orders = if args.all_accounts {
-        raw::fetch_order_list(&token, None, &query).await?
-    } else {
-        let account_hash = match &args.account {
-            Some(selector) => {
-                crate::account::resolve_account(&token, selector)
-                    .await?
-                    .account_hash
-            }
-            None => crate::account::resolve_default_account_hash(&token).await?,
-        };
-        raw::fetch_order_list(&token, Some(&account_hash), &query).await?
-    };
+    if !args.include_inactive {
+        orders.retain(is_active_order);
+    }
 
-    let orders = raw::sanitize_order(raw::normalize_order_list_response(raw_orders));
-    let count = orders.as_array().map_or(0, Vec::len);
-    let warnings = raw::order_activity_warnings(&orders);
+    let order_value = raw::sanitize_order(Value::Array(orders));
+    let count = order_value.as_array().map_or(0, Vec::len);
+    let warnings = raw::order_activity_warnings(&order_value);
 
     let mut output = serde_json::json!({
-        "orders": orders,
+        "orders": order_value,
         "count": count,
+        "include_inactive": args.include_inactive,
+        "active_statuses": ACTIVE_ORDER_STATUSES,
     });
 
     if !warnings.is_empty() {
@@ -174,11 +197,13 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
     Ok(output)
 }
 
-/// Retrieves a single order by account and order ID.
-pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
-    let client = auth::provider(cli)?.client().await?;
-    let order = client.get_order(&args.account, args.order_id).await?;
-    Ok(raw::sanitize_order(serde_json::to_value(&order)?))
+/// Returns whether a raw Schwab order has an active/open status.
+#[must_use]
+fn is_active_order(order: &Value) -> bool {
+    order
+        .get("status")
+        .and_then(Value::as_str)
+        .is_some_and(|status| ACTIVE_ORDER_STATUSES.contains(&status))
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
@@ -194,9 +219,9 @@ pub(crate) async fn handle_cancel(cli: &Cli, args: &OrderCancelArgs) -> Result<V
     verify::action_value(result)
 }
 
-/// Normalizes list date arguments to RFC3339 instants.
-fn normalize_list_range(
-    args: &OrderListArgs,
+/// Normalizes active-order date arguments to RFC3339 instants.
+fn normalize_get_range(
+    args: &OrderGetArgs,
     now: OffsetDateTime,
 ) -> Result<(String, String), AppError> {
     let to_time = match &args.to {
@@ -215,7 +240,7 @@ fn normalize_list_range(
 
     if from_time > to_time {
         return Err(AppError::OrderValidation(
-            "order list --from must be before or equal to --to".to_string(),
+            "order get --from must be before or equal to --to".to_string(),
         ));
     }
 
@@ -230,7 +255,7 @@ fn parse_range_instant(value: &str, boundary: RangeBoundary) -> Result<OffsetDat
 
     OffsetDateTime::parse(value, &Rfc3339).map_err(|e| {
         AppError::OrderValidation(format!(
-            "invalid order list date/time '{value}': expected YYYY-MM-DD or RFC3339 ({e})"
+            "invalid order get date/time '{value}': expected YYYY-MM-DD or RFC3339 ({e})"
         ))
     })
 }
@@ -281,7 +306,7 @@ fn format_rfc3339(value: OffsetDateTime) -> String {
 
 /// Builds a consistent validation error for invalid YYYY-MM-DD dates.
 fn invalid_date<E: std::fmt::Display>(value: &str, error: E) -> AppError {
-    AppError::OrderValidation(format!("invalid order list date '{value}': {error}"))
+    AppError::OrderValidation(format!("invalid order get date '{value}': {error}"))
 }
 
 // ---------------------------------------------------------------------------
@@ -293,121 +318,167 @@ mod tests {
     use clap::Parser;
     use time::{Duration, OffsetDateTime};
 
-    use super::{OrderListArgs, normalize_list_range};
+    use super::{ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range};
     use crate::cli::{Cli, Command};
     use crate::order::OrderCommand;
 
     #[test]
-    fn parse_order_list_no_args() {
-        let cli = Cli::parse_from(["schwab-agent", "order", "list"]);
-        let Command::Order(OrderCommand::List(args)) = cli.command else {
-            panic!("expected order list command");
+    fn parse_order_get_no_args_means_all_active_orders() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "get"]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
         };
         assert!(args.account.is_none());
-        assert!(!args.all_accounts);
-        assert!(args.status.is_none());
+        assert!(args.order_id.is_none());
         assert!(args.from.is_none());
         assert!(args.to.is_none());
         assert!(!args.recent);
-        assert!(args.max_results.is_none());
+        assert!(!args.include_inactive);
     }
 
     #[test]
-    fn parse_order_list_all_accounts() {
-        let cli = Cli::parse_from(["schwab-agent", "order", "list", "--all-accounts"]);
-        let Command::Order(OrderCommand::List(args)) = cli.command else {
-            panic!("expected order list command");
-        };
-        assert!(args.account.is_none());
-        assert!(args.all_accounts);
-    }
-
-    #[test]
-    fn parse_order_list_rejects_account_with_all_accounts() {
-        assert!(
-            Cli::try_parse_from([
-                "schwab-agent",
-                "order",
-                "list",
-                "--account",
-                "HASH123",
-                "--all-accounts"
-            ])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn parse_order_list_with_account_and_status() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
-            "order",
-            "list",
-            "--account",
-            "HASH123",
-            "--status",
-            "WORKING",
-        ]);
-        let Command::Order(OrderCommand::List(args)) = cli.command else {
-            panic!("expected order list command");
+    fn parse_order_get_with_account_means_account_active_orders() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "get", "--account", "HASH123"]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
         };
         assert_eq!(args.account.as_deref(), Some("HASH123"));
-        assert_eq!(args.status.as_deref(), Some("WORKING"));
+        assert!(args.order_id.is_none());
     }
 
     #[test]
-    fn parse_order_list_recent() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
-            "order",
-            "list",
-            "--account",
-            "HASH123",
-            "--recent",
-        ]);
-        let Command::Order(OrderCommand::List(args)) = cli.command else {
-            panic!("expected order list command");
-        };
-        assert_eq!(args.account.as_deref(), Some("HASH123"));
-        assert!(args.recent);
-    }
-
-    #[test]
-    fn parse_order_list_with_time_range() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
-            "order",
-            "list",
-            "--from",
-            "2025-01-01",
-            "--to",
-            "2025-06-01T12:00:00Z",
-            "--max-results",
-            "50",
-        ]);
-        let Command::Order(OrderCommand::List(args)) = cli.command else {
-            panic!("expected order list command");
-        };
-        assert_eq!(args.from.as_deref(), Some("2025-01-01"));
-        assert_eq!(args.to.as_deref(), Some("2025-06-01T12:00:00Z"));
-        assert_eq!(args.max_results, Some(50));
-    }
-
-    #[test]
-    fn parse_order_get() {
+    fn parse_order_get_recent() {
         let cli = Cli::parse_from([
             "schwab-agent",
             "order",
             "get",
             "--account",
             "HASH123",
+            "--recent",
+        ]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
+        };
+        assert_eq!(args.account.as_deref(), Some("HASH123"));
+        assert!(args.recent);
+    }
+
+    #[test]
+    fn parse_order_get_include_inactive() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "get", "--include-inactive"]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
+        };
+        assert!(args.account.is_none());
+        assert!(args.order_id.is_none());
+        assert!(args.include_inactive);
+    }
+
+    #[test]
+    fn parse_order_get_with_time_range() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "get",
+            "--from",
+            "2025-01-01",
+            "--to",
+            "2025-06-01T12:00:00Z",
+        ]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
+        };
+        assert_eq!(args.from.as_deref(), Some("2025-01-01"));
+        assert_eq!(args.to.as_deref(), Some("2025-06-01T12:00:00Z"));
+    }
+
+    #[test]
+    fn parse_order_get_specific_order() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "get",
+            "--account",
+            "HASH123",
+            "--order",
             "12345",
         ]);
         let Command::Order(OrderCommand::Get(args)) = cli.command else {
             panic!("expected order get command");
         };
-        assert_eq!(args.account, "HASH123");
-        assert_eq!(args.order_id, 12345);
+        assert_eq!(args.account.as_deref(), Some("HASH123"));
+        assert_eq!(args.order_id, Some(12345));
+    }
+
+    #[test]
+    fn parse_order_get_rejects_order_without_account() {
+        assert!(Cli::try_parse_from(["schwab-agent", "order", "get", "--order", "12345"]).is_err());
+    }
+
+    #[test]
+    fn parse_order_get_rejects_discovery_flags_with_specific_order() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "get",
+                "--account",
+                "HASH123",
+                "--order",
+                "12345",
+                "--include-inactive"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "get",
+                "--account",
+                "HASH123",
+                "--order",
+                "12345",
+                "--recent"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_order_list_is_removed() {
+        assert!(Cli::try_parse_from(["schwab-agent", "order", "list"]).is_err());
+    }
+
+    #[test]
+    fn active_order_statuses_include_requested_patterns() {
+        assert!(
+            ACTIVE_ORDER_STATUSES
+                .iter()
+                .any(|status| status.starts_with("AWAITING_"))
+        );
+        assert!(
+            ACTIVE_ORDER_STATUSES
+                .iter()
+                .any(|status| status.starts_with("PENDING_"))
+        );
+        assert!(ACTIVE_ORDER_STATUSES.contains(&"PENDING_ACTIVATION"));
+        assert!(ACTIVE_ORDER_STATUSES.contains(&"QUEUED"));
+        assert!(ACTIVE_ORDER_STATUSES.contains(&"WORKING"));
+        assert!(ACTIVE_ORDER_STATUSES.contains(&"NEW"));
+    }
+
+    #[test]
+    fn is_active_order_uses_active_status_allowlist() {
+        let active = serde_json::json!({ "status": "WORKING" });
+        let inactive = serde_json::json!({ "status": "FILLED" });
+        let unknown = serde_json::json!({ "status": "SOME_NEW_STATUS" });
+        let missing = serde_json::json!({ "orderId": 12345 });
+
+        assert!(is_active_order(&active));
+        assert!(!is_active_order(&inactive));
+        assert!(!is_active_order(&unknown));
+        assert!(!is_active_order(&missing));
     }
 
     #[test]
@@ -471,20 +542,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_order_list_rejects_non_positive_max_results() {
-        assert!(
-            Cli::try_parse_from(["schwab-agent", "order", "list", "--max-results", "0"]).is_err()
-        );
-        assert!(
-            Cli::try_parse_from(["schwab-agent", "order", "list", "--max-results", "-1"]).is_err()
-        );
-    }
-
-    #[test]
     fn parse_order_get_and_cancel_reject_non_positive_order_ids() {
         assert!(
-            Cli::try_parse_from(["schwab-agent", "order", "get", "--account", "HASH123", "0"])
-                .is_err()
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "get",
+                "--account",
+                "HASH123",
+                "--order",
+                "0"
+            ])
+            .is_err()
         );
         assert!(
             Cli::try_parse_from([
@@ -512,69 +581,66 @@ mod tests {
     }
 
     #[test]
-    fn normalize_list_range_expands_date_only_boundaries() {
+    fn normalize_get_range_expands_date_only_boundaries() {
         let now = OffsetDateTime::parse(
             "2026-06-15T12:00:00Z",
             &time::format_description::well_known::Rfc3339,
         )
         .unwrap();
-        let args = OrderListArgs {
+        let args = OrderGetArgs {
             account: None,
-            all_accounts: false,
-            status: None,
+            order_id: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31".to_string()),
             recent: false,
-            max_results: None,
+            include_inactive: false,
         };
 
-        let (from, to) = normalize_list_range(&args, now).unwrap();
+        let (from, to) = normalize_get_range(&args, now).unwrap();
 
         assert_eq!(from, "2026-05-28T00:00:00Z");
         assert_eq!(to, "2026-05-31T23:59:59.999999999Z");
     }
 
     #[test]
-    fn normalize_list_range_allows_mixed_date_and_rfc3339() {
+    fn normalize_get_range_allows_mixed_date_and_rfc3339() {
         let now = OffsetDateTime::parse(
             "2026-06-15T12:00:00Z",
             &time::format_description::well_known::Rfc3339,
         )
         .unwrap();
-        let args = OrderListArgs {
+        let args = OrderGetArgs {
             account: None,
-            all_accounts: false,
-            status: None,
+            order_id: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31T12:30:00Z".to_string()),
             recent: false,
-            max_results: None,
+            include_inactive: false,
         };
 
-        let (from, to) = normalize_list_range(&args, now).unwrap();
+        let (from, to) = normalize_get_range(&args, now).unwrap();
 
         assert_eq!(from, "2026-05-28T00:00:00Z");
         assert_eq!(to, "2026-05-31T12:30:00Z");
     }
 
     #[test]
-    fn normalize_list_range_recent_overrides_from() {
+    fn normalize_get_range_recent_overrides_from() {
         let now = OffsetDateTime::parse(
             "2026-06-15T12:00:00Z",
             &time::format_description::well_known::Rfc3339,
         )
         .unwrap();
-        let args = OrderListArgs {
+        let args = OrderGetArgs {
             account: None,
-            all_accounts: false,
-            status: None,
+            order_id: None,
             from: Some("2026-05-28".to_string()),
             to: None,
             recent: true,
-            max_results: None,
+            include_inactive: false,
         };
 
-        let (from, to) = normalize_list_range(&args, now).unwrap();
+        let (from, to) = normalize_get_range(&args, now).unwrap();
 
         assert_eq!(
             from,
@@ -590,23 +656,22 @@ mod tests {
     }
 
     #[test]
-    fn normalize_list_range_rejects_reversed_ranges() {
+    fn normalize_get_range_rejects_reversed_ranges() {
         let now = OffsetDateTime::parse(
             "2026-06-15T12:00:00Z",
             &time::format_description::well_known::Rfc3339,
         )
         .unwrap();
-        let args = OrderListArgs {
+        let args = OrderGetArgs {
             account: None,
-            all_accounts: false,
-            status: None,
+            order_id: None,
             from: Some("2026-06-01".to_string()),
             to: Some("2026-05-31".to_string()),
             recent: false,
-            max_results: None,
+            include_inactive: false,
         };
 
-        let error = normalize_list_range(&args, now).unwrap_err();
+        let error = normalize_get_range(&args, now).unwrap_err();
         assert!(error.to_string().contains("--from must be before"));
     }
 }
