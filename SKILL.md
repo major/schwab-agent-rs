@@ -519,6 +519,7 @@ On error (non-zero exit code), read `hint` for recovery steps. Check `retryable`
 | `schwab.http_status` | API HTTP error | Check message for status code |
 | `input.empty_symbols` | No symbols given | Provide at least one symbol |
 | `account.validation_failed` | Account input validation error | Read the error message and hint for details (invalid `--fields`, unknown account selector, ambiguous nickname) |
+| `account.response_shape` | Schwab account response shape is not recognized | Update schwab-agent-rs or report the sanitized shape metadata from the message |
 | `market.validation_failed` | Invalid market-data params | Use a listed `--fields` value or read the error hint |
 | `order.validation_failed` | Bad order params | Check strike/expiration values |
 | `order.preview_failed` | Preview issue | Re-run preview (may have expired) |

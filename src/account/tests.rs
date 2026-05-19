@@ -161,6 +161,24 @@ fn account_error_hint_is_present() {
     assert!(err.hint().is_some());
 }
 
+#[test]
+fn account_response_shape_error_is_structured() {
+    let err = AppError::AccountResponseShape {
+        endpoint: "accountNumbers",
+        expected: "array",
+        shape: "object(len=1, fields=[errors:array])".to_string(),
+    };
+
+    assert_eq!(err.exit_code(), 20);
+    assert_eq!(err.code(), "account.response_shape");
+    assert_eq!(err.category(), "account");
+    assert!(err.hint().is_some());
+    assert!(
+        err.to_string()
+            .contains("object(len=1, fields=[errors:array])")
+    );
+}
+
 fn make_hash(account_number: &str, hash_value: &str) -> schwab::AccountNumberHash {
     schwab::AccountNumberHash {
         account_number: Some(account_number.to_string()),

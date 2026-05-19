@@ -8,6 +8,8 @@
 //!   return `{"key": [...]}` instead of a bare `[...]`.
 //! - **Bare user preference objects** (GitHub #46): the user preference endpoint
 //!   can return a single object where the typed crate expects a one-item array.
+//! - **Linked-account envelopes** (GitHub #62): the account-number endpoint can
+//!   return linked account hashes under a named object field.
 //! - **Boolean `false` for absent numerics** (GitHub #18): some numeric fields
 //!   serialize as `false` instead of `null` or `0`.
 
@@ -24,6 +26,9 @@ const ACCOUNT_NUMBERS_URL: &str = "https://api.schwabapi.com/trader/v1/accounts/
 
 /// Schwab Trader API user preference endpoint.
 const USER_PREFERENCE_URL: &str = "https://api.schwabapi.com/trader/v1/userPreference";
+
+/// Account number response fields that can contain linked account hashes.
+const ACCOUNT_NUMBER_ARRAY_FIELDS: &[&str] = &["accounts", "accountNumbers", "linkedAccounts"];
 
 /// Schwab Trader API cross-account orders endpoint.
 const ORDERS_URL: &str = "https://api.schwabapi.com/trader/v1/orders";
@@ -107,7 +112,7 @@ pub async fn fetch_accounts(
 /// `Vec<AccountNumberHash>`.
 pub async fn fetch_account_numbers(bearer_token: &str) -> Result<Vec<AccountNumberHash>, AppError> {
     let value = fetch_json(ACCOUNT_NUMBERS_URL, bearer_token).await?;
-    let array = unwrap_array_fields(value, &["accounts", "accountNumbers"]);
+    let array = account_numbers_array(value)?;
 
     Ok(serde_json::from_value(array)?)
 }
@@ -326,6 +331,63 @@ fn unwrap_array_fields(value: Value, fields: &[&str]) -> Value {
             .find_map(|field| map.get(*field).filter(|value| value.is_array()).cloned())
             .unwrap_or_else(|| unwrap_array_field(value, "")),
         _ => unwrap_array_field(value, ""),
+    }
+}
+
+/// Extracts linked account hashes from the account-number response.
+fn account_numbers_array(value: Value) -> Result<Value, AppError> {
+    let array = unwrap_array_fields(value, ACCOUNT_NUMBER_ARRAY_FIELDS);
+    if array.is_array() {
+        Ok(array)
+    } else {
+        Err(AppError::AccountResponseShape {
+            endpoint: "accountNumbers",
+            expected: "a bare array or object field accounts, accountNumbers, or linkedAccounts containing an array",
+            shape: describe_json_shape(&array),
+        })
+    }
+}
+
+/// Returns sanitized JSON shape metadata without including values.
+#[must_use]
+fn describe_json_shape(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(_) => "boolean".to_string(),
+        Value::Number(_) => "number".to_string(),
+        Value::String(_) => "string".to_string(),
+        Value::Array(items) => format!("array(len={})", items.len()),
+        Value::Object(map) => {
+            let fields = map
+                .iter()
+                .map(|(key, value)| format!("{}:{}", safe_shape_key(key), json_type(value)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("object(len={}, fields=[{fields}])", map.len())
+        }
+    }
+}
+
+/// Returns a safe field label for shape metadata.
+#[must_use]
+fn safe_shape_key(key: &str) -> &str {
+    match key {
+        "accountNumbers" | "accounts" | "errors" | "linkedAccounts" | "metadata"
+        | "userPreference" | "userPreferences" => key,
+        _ => "<redacted>",
+    }
+}
+
+/// Returns the top-level JSON type name for a value.
+#[must_use]
+fn json_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 
@@ -854,12 +916,45 @@ mod tests {
             "accountNumbers": [{"accountNumber": "12345678", "hashValue": "HASH123"}],
             "metadata": {"ignored": true}
         });
-        let normalized = unwrap_array_fields(input, &["accounts", "accountNumbers"]);
+        let normalized = account_numbers_array(input).unwrap();
         let hashes: Vec<AccountNumberHash> = serde_json::from_value(normalized).unwrap();
 
         assert_eq!(hashes.len(), 1);
         assert_eq!(hashes[0].account_number.as_deref(), Some("12345678"));
         assert_eq!(hashes[0].hash_value.as_deref(), Some("HASH123"));
+    }
+
+    #[test]
+    fn account_numbers_pipeline_deserializes_linked_accounts_envelope() {
+        let input = json!({
+            "linkedAccounts": [{"accountNumber": "12345678", "hashValue": "HASH123"}],
+            "metadata": {"requestId": "ignored"}
+        });
+        let normalized = account_numbers_array(input).unwrap();
+        let hashes: Vec<AccountNumberHash> = serde_json::from_value(normalized).unwrap();
+
+        assert_eq!(hashes.len(), 1);
+        assert_eq!(hashes[0].account_number.as_deref(), Some("12345678"));
+        assert_eq!(hashes[0].hash_value.as_deref(), Some("HASH123"));
+    }
+
+    #[test]
+    fn account_numbers_pipeline_reports_sanitized_shape_for_unknown_envelope() {
+        let input = json!({
+            "unexpected": {"accountNumber": "12345678", "hashValue": "HASH123"},
+            "metadata": {"requestId": "ignored"}
+        });
+        let err = account_numbers_array(input).unwrap_err();
+
+        assert_eq!(err.code(), "account.response_shape");
+        let message = err.to_string();
+        assert!(message.contains("object(len=2, fields=["));
+        assert!(message.contains("metadata:object"));
+        assert!(message.contains("<redacted>:object"));
+        assert!(!message.contains("unexpected:object"));
+        assert!(!message.contains("12345678"));
+        assert!(!message.contains("HASH123"));
+        assert!(!message.contains("ignored"));
     }
 
     #[test]

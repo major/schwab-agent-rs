@@ -19,6 +19,8 @@ Agent-oriented JSON CLI porcelain for the Charles Schwab API, built on top of [s
 
 Commands output raw JSON data payloads directly for minimal token overhead. Errors output a structured JSON object with `code`, `message`, `category`, `retryable`, and `hint` fields.
 
+Account response shape mismatches return `account.response_shape` with sanitized top-level JSON shape metadata in the message, so unexpected Schwab envelopes can be reported without exposing account numbers, balances, positions, or hashes.
+
 ## Prerequisites
 
 - Rust toolchain (stable, >= 1.95)
