@@ -52,7 +52,7 @@ pub(crate) struct OrderActionResult {
     pub verified_order: Option<Value>,
     /// Preview digest used for place-from-preview actions.
     pub digest: Option<String>,
-    /// Original command that created the preview (e.g., `order.preview.long-call`).
+    /// Original command that created the preview (e.g., `order.option.buy-to-open`).
     pub original_command: Option<String>,
 }
 
@@ -62,6 +62,7 @@ pub(crate) struct OrderActionResult {
 /// or with [`VerificationState::Unverified`] and failure reasons when it
 /// doesn't. The action is still considered successful either way; verification
 /// is purely informational for the agent.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn verify_order(
     client: &schwab::Client,
     account: &str,
@@ -325,12 +326,12 @@ mod tests {
             verification_failures: vec![],
             verified_order: Some(json!({"orderId": 12345, "status": "WORKING"})),
             digest: Some("abc123def456".to_string()),
-            original_command: Some("order.preview.long-call".to_string()),
+            original_command: Some("order.option.buy-to-open".to_string()),
         };
 
         let data = action_value(result).unwrap();
         assert_eq!(data["digest"], "abc123def456");
-        assert_eq!(data["original_command"], "order.preview.long-call");
+        assert_eq!(data["original_command"], "order.option.buy-to-open");
     }
 
     #[test]

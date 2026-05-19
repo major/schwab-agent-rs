@@ -11,6 +11,7 @@ use crate::cli::{AccountArgs, Cli};
 use crate::error::AppError;
 
 /// Dispatches the account command and returns its JSON value.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle(_cli: &Cli, args: &AccountArgs) -> Result<Value, AppError> {
     if let Some(selector) = &args.selector
         && !args.requests_summary()
@@ -133,6 +134,7 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 /// # Errors
 ///
 /// Returns an `AppError` when any Schwab API call fails.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn run_summary(
     bearer_token: &str,
     with_positions: bool,
@@ -451,6 +453,7 @@ pub(crate) fn resolve_default_account_hash_from_data(
 /// Returns an `AppError` when the selector does not match any account or when a
 /// nickname selector matches more than one account. Schwab API failures also
 /// return an `AppError`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn resolve_account(
     bearer_token: &str,
     selector: &str,

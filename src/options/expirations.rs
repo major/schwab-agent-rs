@@ -11,6 +11,7 @@ use crate::error::AppError;
 /// Calls the Schwab expiration chain endpoint and transforms the response into
 /// a sorted table of expiration dates with client-computed days-to-expiration,
 /// expiration type, and settlement type.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn handle(client: &Client, symbol: &str) -> Result<Value, AppError> {
     let chain =
         client

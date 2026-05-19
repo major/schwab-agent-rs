@@ -37,7 +37,7 @@ pub struct SavedPreview {
     pub account_hash: String,
     /// The order payload exactly as previewed, stored as a JSON value.
     pub order: Value,
-    /// Command name (e.g., `"order.preview.long-call"`, `"stock.preview.buy"`).
+    /// Command name (e.g., `"order.option.buy-to-open"`, `"order.equity.buy"`).
     pub command: String,
     /// Unix timestamp (seconds) when the preview was saved.
     pub saved_at: i64,
@@ -240,7 +240,7 @@ mod tests {
             version: 1,
             account_hash: "test-account-hash".to_string(),
             order,
-            command: "order.preview.long-call".to_string(),
+            command: "order.option.buy-to-open".to_string(),
             saved_at: now,
         };
 
@@ -271,14 +271,14 @@ mod tests {
             version: 1,
             account_hash: "account-a".to_string(),
             order: order.clone(),
-            command: "order.preview.long-call".to_string(),
+            command: "order.option.buy-to-open".to_string(),
             saved_at: now,
         };
         let p2 = SavedPreview {
             version: 1,
             account_hash: "account-b".to_string(),
             order,
-            command: "order.preview.long-call".to_string(),
+            command: "order.option.buy-to-open".to_string(),
             saved_at: now,
         };
 
@@ -302,7 +302,7 @@ mod tests {
         let _state_home = EnvVarGuard::set_path("XDG_STATE_HOME", temp_dir.path());
 
         let result = (|| {
-            let digest = save_preview("HASH_A", &test_order_value(), "order.preview.long-call")?;
+            let digest = save_preview("HASH_A", &test_order_value(), "order.option.buy-to-open")?;
             load_preview(&digest, "HASH_B")
         })();
 

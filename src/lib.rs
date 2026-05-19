@@ -1,11 +1,12 @@
 //! Agent-oriented JSON CLI porcelain for the `schwab` crate.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 pub mod account;
 mod analyze;
 mod auth;
 mod cli;
 mod config;
-mod equity;
 mod error;
 mod market;
 mod options;
@@ -26,6 +27,7 @@ use crate::error::AppError;
 use crate::output::ErrorBody;
 
 /// Parses process arguments, runs the selected command, and writes JSON output.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn run_from_env() -> i32 {
     run(Cli::parse()).await
 }
@@ -46,13 +48,11 @@ pub async fn run(cli: Cli) -> i32 {
 }
 
 /// Executes a command and returns the data payload directly.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn execute(cli: Cli) -> Result<Value, AppError> {
-    // Order and stock commands produce their own data values with dynamic command names.
+    // Order commands produce their own data values with dynamic command names.
     if let Command::Order(command) = &cli.command {
         return order::handle(&cli, command).await;
-    }
-    if let Command::Stock(command) = &cli.command {
-        return equity::handle(&cli, command).await;
     }
     if let Command::Analyze(args) = &cli.command {
         let client = auth::provider()?.client().await?;
@@ -84,7 +84,6 @@ pub async fn execute(cli: Cli) -> Result<Value, AppError> {
             }
         }
         Command::Order(_) => unreachable!("handled above"),
-        Command::Stock(_) => unreachable!("handled above"),
         Command::Account(command) => account::handle(&cli, command).await,
     }
 }

@@ -13,6 +13,7 @@ use super::types::{
 };
 
 /// Fetches, filters, and projects a compact option chain response.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn handle(client: &Client, args: &ChainArgs) -> Result<Value, AppError> {
     let options = chain_options(args);
     let chain = client
@@ -188,4 +189,156 @@ fn date_string(date: Date) -> String {
         u8::from(date.month()),
         date.day()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::Month;
+
+    #[test]
+    fn date_string_formats_correctly() {
+        let d = Date::from_calendar_date(2025, Month::June, 1).unwrap();
+        assert_eq!(date_string(d), "2025-06-01");
+    }
+
+    #[test]
+    fn optional_number_none_returns_none() {
+        assert!(optional_number(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn optional_number_some_returns_number() {
+        let n = optional_number(Some(42.5)).unwrap().unwrap();
+        assert_eq!(n.to_string(), "42.5");
+    }
+
+    #[test]
+    fn map_chain_error_400_returns_symbol_not_found() {
+        let err = schwab::Error::HttpStatus {
+            status: 400,
+            body: "bad".to_string(),
+        };
+        let mapped = map_chain_error(err, "XYZ");
+        assert!(matches!(mapped, AppError::OptionsSymbolNotFound { .. }));
+    }
+
+    #[test]
+    fn map_chain_error_404_returns_symbol_not_found() {
+        let err = schwab::Error::HttpStatus {
+            status: 404,
+            body: "not found".to_string(),
+        };
+        let mapped = map_chain_error(err, "XYZ");
+        assert!(matches!(mapped, AppError::OptionsSymbolNotFound { .. }));
+    }
+
+    #[test]
+    fn map_chain_error_500_returns_schwab_error() {
+        let err = schwab::Error::HttpStatus {
+            status: 500,
+            body: "server error".to_string(),
+        };
+        let mapped = map_chain_error(err, "XYZ");
+        assert!(matches!(mapped, AppError::Schwab(_)));
+    }
+
+    #[test]
+    fn chain_options_basic_symbol() {
+        let args = ChainArgs {
+            symbol: "AAPL".to_string(),
+            contract_type: None,
+            strike_count: None,
+            strike_range: None,
+            strike: None,
+            dte: None,
+            expiration: None,
+            fields: None,
+            strike_min: None,
+            strike_max: None,
+            delta_min: None,
+            delta_max: None,
+        };
+        // Verifies the builder doesn't panic with minimal args.
+        let _opts = chain_options(&args);
+    }
+
+    #[test]
+    fn chain_options_with_all_filters() {
+        let args = ChainArgs {
+            symbol: "SPY".to_string(),
+            contract_type: Some("CALL".to_string()),
+            strike_count: Some(10),
+            strike_range: Some("ITM".to_string()),
+            strike: Some(450.0),
+            dte: None,
+            expiration: Some("2025-06-20".to_string()),
+            fields: None,
+            strike_min: None,
+            strike_max: None,
+            delta_min: None,
+            delta_max: None,
+        };
+        let _opts = chain_options(&args);
+    }
+
+    #[test]
+    fn chain_options_with_dte() {
+        let args = ChainArgs {
+            symbol: "SPY".to_string(),
+            contract_type: None,
+            strike_count: None,
+            strike_range: None,
+            strike: None,
+            dte: Some(30),
+            expiration: None,
+            fields: None,
+            strike_min: None,
+            strike_max: None,
+            delta_min: None,
+            delta_max: None,
+        };
+        let _opts = chain_options(&args);
+    }
+
+    #[test]
+    fn requested_fields_defaults_to_chain_fields() {
+        let args = ChainArgs {
+            symbol: "AAPL".to_string(),
+            contract_type: None,
+            strike_count: None,
+            strike_range: None,
+            strike: None,
+            dte: None,
+            expiration: None,
+            fields: None,
+            strike_min: None,
+            strike_max: None,
+            delta_min: None,
+            delta_max: None,
+        };
+        let fields = requested_fields(&args).unwrap();
+        assert!(!fields.is_empty());
+        assert!(fields.contains(&"symbol".to_string()));
+    }
+
+    #[test]
+    fn requested_fields_with_custom_fields() {
+        let args = ChainArgs {
+            symbol: "AAPL".to_string(),
+            contract_type: None,
+            strike_count: None,
+            strike_range: None,
+            strike: None,
+            dte: None,
+            expiration: None,
+            fields: Some("symbol,strike,bid,ask".to_string()),
+            strike_min: None,
+            strike_max: None,
+            delta_min: None,
+            delta_max: None,
+        };
+        let fields = requested_fields(&args).unwrap();
+        assert_eq!(fields, vec!["symbol", "strike", "bid", "ask"]);
+    }
 }

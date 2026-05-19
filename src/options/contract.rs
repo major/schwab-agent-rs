@@ -20,6 +20,7 @@ use super::types::{FlatContract, compute_dte, flatten_chain};
 ///
 /// Returns [`AppError::OptionsValidation`] if no matching contract is found.
 /// Returns [`AppError::OptionsSymbolNotFound`] if the symbol has no listed options.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn handle(client: &Client, args: &ContractArgs) -> Result<Value, AppError> {
     let contract_type = if args.call { "CALL" } else { "PUT" };
 

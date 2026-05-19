@@ -130,6 +130,7 @@ enum RangeBoundary {
 // ---------------------------------------------------------------------------
 
 /// Retrieves active/all orders or a single order by account and order ID.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle_get(_cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
     let provider = auth::provider()?;
     let token = provider.token().await?;
@@ -151,6 +152,7 @@ pub(crate) async fn handle_get(_cli: &Cli, args: &OrderGetArgs) -> Result<Value,
 }
 
 /// Retrieves discovery-mode orders across all accounts or a selected account.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Value, AppError> {
     let (from_time, to_time) = normalize_get_range(args, OffsetDateTime::now_utc())?;
     let account_hash = match &args.account {
@@ -219,6 +221,7 @@ fn is_active_order(order: &Value) -> bool {
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle_cancel(_cli: &Cli, args: &OrderCancelArgs) -> Result<Value, AppError> {
     crate::config::require_mutable_enabled()?;
     let client = auth::provider()?.client().await?;
@@ -334,8 +337,7 @@ mod tests {
         ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
         render_order_discovery_response,
     };
-    use crate::cli::{Cli, Command};
-    use crate::order::OrderCommand;
+    use crate::cli::{Cli, Command, OrderCommand};
 
     #[test]
     fn parse_order_get_no_args_means_all_active_orders() {

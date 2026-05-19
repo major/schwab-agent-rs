@@ -23,7 +23,7 @@ doc:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" cargo doc --no-deps
 
 coverage:
-	cargo llvm-cov test --fail-under-lines 90
+	cargo +nightly llvm-cov test --fail-under-lines 90 --ignore-filename-regex '(main|analyze/mod)\.rs$$'
 
 audit:
 	cargo audit

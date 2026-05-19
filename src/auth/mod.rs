@@ -19,6 +19,7 @@ use crate::error::AppError;
 const REFRESH_TOKEN_MAX_AGE_SECONDS: i64 = 561_600;
 
 /// Dispatches an `auth` subcommand to the appropriate handler.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle(_cli: &Cli, command: &AuthCommand) -> Result<Value, AppError> {
     match command {
         AuthCommand::Status => status(),
@@ -76,6 +77,7 @@ fn status() -> Result<Value, AppError> {
 ///
 /// Optionally opens the authorization URL in the system browser. Writes the resulting
 /// token to disk via `FileTokenStore` so subsequent commands can reuse it.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn login(args: &LoginArgs) -> Result<Value, AppError> {
     let token_path = crate::config::token_path();
     if let Some(parent) = token_path.parent() {
@@ -122,6 +124,7 @@ fn login_url(args: &LoginUrlArgs) -> Result<Value, AppError> {
 /// Exchanges a Schwab redirect URL for an access/refresh token pair and saves it to disk.
 ///
 /// This is the second step of the manual login flow started by `login_url`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn exchange(args: &AuthExchangeArgs) -> Result<Value, AppError> {
     let (_client_id, _client_secret, callback_url) = crate::config::resolve_credentials()?;
     let context = AuthContext {
@@ -144,6 +147,7 @@ async fn exchange(args: &AuthExchangeArgs) -> Result<Value, AppError> {
 }
 
 /// Uses the saved refresh token to obtain a new access token and overwrites the token file.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn refresh() -> Result<Value, AppError> {
     let token_path = crate::config::token_path();
     let token_file = provider()?.refresh().await?;

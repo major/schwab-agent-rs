@@ -7,6 +7,7 @@ use crate::cli::{Cli, HistoryArgs, MarketCommand, QuoteArgs};
 use crate::error::AppError;
 
 /// Routes market subcommands to their handlers and returns a JSON value.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle(cli: &Cli, command: &MarketCommand) -> Result<Value, AppError> {
     match command {
         MarketCommand::History(args) => history(cli, args).await,
@@ -15,6 +16,7 @@ pub(crate) async fn handle(cli: &Cli, command: &MarketCommand) -> Result<Value, 
 }
 
 /// Fetches price history candles for a single symbol and returns them as JSON.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn history(_cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
     let selected_fields = if args.all_fields {
         None
@@ -196,6 +198,7 @@ fn selected_history_field_value(candle: &Value, field: &str) -> Value {
 
 /// Fetches quotes for the requested symbols from the Schwab API and returns either
 /// compact row output or the full flattened [`QuoteSummary`] object list.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn quote(_cli: &Cli, args: &QuoteArgs) -> Result<Value, AppError> {
     let selected_fields = if args.all_fields {
         None

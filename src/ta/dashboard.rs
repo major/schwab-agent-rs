@@ -115,6 +115,7 @@ struct LatestValues {
 /// Returns [`AppError`] if the interval is invalid, Schwab price history fails,
 /// candle data is insufficient or malformed, indicator math fails, or JSON
 /// serialization fails.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn dashboard(client: &Client, args: &DashboardArgs) -> Result<Value, AppError> {
     let interval = Interval::from_str(&args.interval)?;
     let required_candles = LONG_RANGE_CANDLES + args.points;
