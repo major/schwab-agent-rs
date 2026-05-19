@@ -170,12 +170,24 @@ async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Va
     };
     let raw_orders = raw::fetch_order_list(bearer_token, account_hash.as_deref(), &query).await?;
     let normalized = raw::normalize_order_list_response(raw_orders);
-    let mut orders = match normalized {
-        Value::Array(items) => items,
-        other => vec![other],
+
+    render_order_discovery_response(normalized, args.include_inactive)
+}
+
+/// Renders discovery-mode order list output from a normalized Schwab response.
+///
+/// Non-array payloads are returned unchanged after sanitization. That preserves
+/// unexpected response shapes instead of silently filtering them into an empty
+/// order list because they do not have an order `status` field.
+fn render_order_discovery_response(
+    normalized: Value,
+    include_inactive: bool,
+) -> Result<Value, AppError> {
+    let Value::Array(mut orders) = normalized else {
+        return Ok(raw::sanitize_order(normalized));
     };
 
-    if !args.include_inactive {
+    if !include_inactive {
         orders.retain(is_active_order);
     }
 
@@ -186,7 +198,7 @@ async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Va
     let mut output = serde_json::json!({
         "orders": order_value,
         "count": count,
-        "include_inactive": args.include_inactive,
+        "include_inactive": include_inactive,
         "active_statuses": ACTIVE_ORDER_STATUSES,
     });
 
@@ -318,7 +330,10 @@ mod tests {
     use clap::Parser;
     use time::{Duration, OffsetDateTime};
 
-    use super::{ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range};
+    use super::{
+        ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
+        render_order_discovery_response,
+    };
     use crate::cli::{Cli, Command};
     use crate::order::OrderCommand;
 
@@ -479,6 +494,35 @@ mod tests {
         assert!(!is_active_order(&inactive));
         assert!(!is_active_order(&unknown));
         assert!(!is_active_order(&missing));
+    }
+
+    #[test]
+    fn render_order_discovery_filters_array_orders() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                { "orderId": 1, "status": "WORKING" },
+                { "orderId": 2, "status": "FILLED" },
+                { "orderId": 3 }
+            ]),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["include_inactive"], false);
+        assert_eq!(output["orders"][0]["orderId"], 1);
+    }
+
+    #[test]
+    fn render_order_discovery_preserves_non_array_payload() {
+        let payload = serde_json::json!({
+            "error": "unexpected shape",
+            "status": "SOME_ENVELOPE_STATUS"
+        });
+
+        let output = render_order_discovery_response(payload.clone(), false).unwrap();
+
+        assert_eq!(output, payload);
     }
 
     #[test]
