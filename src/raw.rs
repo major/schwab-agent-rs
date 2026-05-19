@@ -30,6 +30,38 @@ const USER_PREFERENCE_URL: &str = "https://api.schwabapi.com/trader/v1/userPrefe
 /// Account number response fields that can contain linked account hashes.
 const ACCOUNT_NUMBER_ARRAY_FIELDS: &[&str] = &["accounts", "accountNumbers", "linkedAccounts"];
 
+/// Schwab Trader API cross-account orders endpoint.
+const ORDERS_URL: &str = "https://api.schwabapi.com/trader/v1/orders";
+
+/// Schwab Trader API accounts endpoint prefix for per-account order listing.
+const ACCOUNT_ORDERS_URL_PREFIX: &str = "https://api.schwabapi.com/trader/v1/accounts";
+
+/// Warning emitted when an order activity contains an unrecognized enum value.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct OrderActivityWarning {
+    /// Stable warning code for machine readers.
+    pub(crate) code: &'static str,
+    /// JSON field that contained the unrecognized value.
+    pub(crate) field: &'static str,
+    /// The unrecognized Schwab enum value, without account or order details.
+    pub(crate) value: String,
+    /// Count of activity entries containing this field/value pair.
+    pub(crate) count: usize,
+}
+
+/// Parameters for raw order list requests.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OrderListQuery<'a> {
+    /// Inclusive start instant in RFC3339 format.
+    pub(crate) from_entered_time: &'a str,
+    /// Inclusive end instant in RFC3339 format.
+    pub(crate) to_entered_time: &'a str,
+    /// Optional maximum number of orders to return.
+    pub(crate) max_results: Option<u32>,
+    /// Optional Schwab order status filter.
+    pub(crate) status: Option<&'a str>,
+}
+
 /// Fetches accounts from the Schwab API with response normalization.
 ///
 /// Makes a direct HTTP request (bypassing the `schwab` crate's typed
@@ -103,6 +135,30 @@ pub async fn fetch_user_preference(bearer_token: &str) -> Result<Vec<UserPrefere
     Ok(serde_json::from_value(array)?)
 }
 
+/// Fetches order list JSON directly from Schwab without typed order decoding.
+///
+/// Schwab occasionally adds order activity variants before the `schwab` crate's
+/// typed models know about them. Returning raw JSON keeps read-only order
+/// listing resilient while still using the same bearer token and endpoint
+/// semantics as the typed client.
+///
+/// # Errors
+///
+/// Returns an error when the HTTP request fails, Schwab returns a non-success
+/// status, or the body is not valid JSON.
+pub(crate) async fn fetch_order_list(
+    bearer_token: &str,
+    account_hash: Option<&str>,
+    query: &OrderListQuery<'_>,
+) -> Result<Value, AppError> {
+    let url = account_hash.map_or_else(
+        || ORDERS_URL.to_string(),
+        |hash| format!("{ACCOUNT_ORDERS_URL_PREFIX}/{hash}/orders"),
+    );
+
+    fetch_json_query(&url, bearer_token, query).await
+}
+
 /// Fetches a Schwab API URL as raw JSON using bearer authentication.
 async fn fetch_json(url: &str, bearer_token: &str) -> Result<Value, AppError> {
     let response = reqwest::Client::new()
@@ -121,6 +177,136 @@ async fn fetch_json(url: &str, bearer_token: &str) -> Result<Value, AppError> {
     let text = response.text().await.map_err(schwab::Error::Request)?;
 
     Ok(serde_json::from_str(&text)?)
+}
+
+/// Fetches a Schwab order list URL as raw JSON with query parameters.
+async fn fetch_json_query(
+    url: &str,
+    bearer_token: &str,
+    query: &OrderListQuery<'_>,
+) -> Result<Value, AppError> {
+    let max_results = query.max_results.map(|value| value.to_string());
+    let mut params = vec![
+        ("fromEnteredTime", query.from_entered_time),
+        ("toEnteredTime", query.to_entered_time),
+    ];
+
+    if let Some(max_results) = max_results.as_deref() {
+        params.push(("maxResults", max_results));
+    }
+    if let Some(status) = query.status {
+        params.push(("status", status));
+    }
+
+    let response = reqwest::Client::new()
+        .get(url)
+        .bearer_auth(bearer_token)
+        .query(&params)
+        .send()
+        .await
+        .map_err(schwab::Error::Request)?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(schwab::Error::Request)?;
+        return Err(schwab::Error::HttpStatus { status, body }.into());
+    }
+
+    let text = response.text().await.map_err(schwab::Error::Request)?;
+
+    Ok(serde_json::from_str(&text)?)
+}
+
+/// Normalizes order list responses into a bare order array.
+///
+/// Schwab's documented order-list endpoints return arrays. This also accepts
+/// named envelopes to match the defensive normalization style used elsewhere in
+/// this module.
+#[must_use]
+pub(crate) fn normalize_order_list_response(value: Value) -> Value {
+    unwrap_array_fields(value, &["orders", "orderList"])
+}
+
+/// Finds unknown order activity enum values without exposing order identifiers.
+#[must_use]
+pub(crate) fn order_activity_warnings(value: &Value) -> Vec<OrderActivityWarning> {
+    let mut warnings = std::collections::BTreeMap::<(&'static str, String), usize>::new();
+    collect_order_activity_warnings(value, &mut warnings);
+
+    warnings
+        .into_iter()
+        .map(|((field, value), count)| OrderActivityWarning {
+            code: "order.activity_unknown_variant",
+            field,
+            value,
+            count,
+        })
+        .collect()
+}
+
+/// Recursively scans order JSON for unknown activity enum values.
+fn collect_order_activity_warnings(
+    value: &Value,
+    warnings: &mut std::collections::BTreeMap<(&'static str, String), usize>,
+) {
+    match value {
+        Value::Object(map) => {
+            if let Some(activities) = map.get("orderActivityCollection").and_then(Value::as_array) {
+                for activity in activities {
+                    collect_activity_warning(
+                        activity,
+                        "activityType",
+                        is_known_activity_type,
+                        warnings,
+                    );
+                    collect_activity_warning(
+                        activity,
+                        "executionType",
+                        is_known_execution_type,
+                        warnings,
+                    );
+                }
+            }
+
+            for child in map.values() {
+                collect_order_activity_warnings(child, warnings);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_order_activity_warnings(item, warnings);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Adds a warning for a single activity enum field when its value is unknown.
+fn collect_activity_warning(
+    activity: &Value,
+    field: &'static str,
+    known: fn(&str) -> bool,
+    warnings: &mut std::collections::BTreeMap<(&'static str, String), usize>,
+) {
+    let Some(value) = activity.get(field).and_then(Value::as_str) else {
+        return;
+    };
+
+    if known(value) {
+        return;
+    }
+
+    *warnings.entry((field, value.to_string())).or_default() += 1;
+}
+
+/// Returns true for currently known Schwab order activity types.
+fn is_known_activity_type(value: &str) -> bool {
+    matches!(value, "EXECUTION" | "ORDER_ACTION")
+}
+
+/// Returns true for currently known Schwab execution activity types.
+fn is_known_execution_type(value: &str) -> bool {
+    matches!(value, "FILL" | "CANCELED")
 }
 
 /// Extracts the accounts array from a potential object wrapper.
@@ -586,6 +772,88 @@ mod tests {
         assert_eq!(result["instrument"]["symbol"], "AAPL");
         assert!(result["instrument"].get("maturityDate").is_none());
         assert!(result["instrument"].get("variableRate").is_none());
+    }
+
+    // --- order list activity warnings ---
+
+    #[test]
+    fn normalize_order_list_accepts_bare_array() {
+        let input = json!([{"orderId": 42}]);
+
+        assert_eq!(normalize_order_list_response(input.clone()), input);
+    }
+
+    #[test]
+    fn normalize_order_list_accepts_named_envelope() {
+        let orders = json!([{"orderId": 42}]);
+        let input = json!({"orders": orders, "metadata": {"ignored": true}});
+
+        assert_eq!(normalize_order_list_response(input), orders);
+    }
+
+    #[test]
+    fn canceled_order_activity_is_known_and_preserved() {
+        let input = json!([{
+            "orderId": 42,
+            "accountNumber": "123456789",
+            "orderActivityCollection": [{
+                "activityType": "EXECUTION",
+                "executionType": "CANCELED",
+                "quantity": null
+            }]
+        }]);
+
+        let sanitized = sanitize_order(input);
+
+        assert_eq!(order_activity_warnings(&sanitized), Vec::new());
+        assert!(sanitized[0].get("accountNumber").is_none());
+        assert_eq!(
+            sanitized[0]["orderActivityCollection"][0]["executionType"],
+            "CANCELED"
+        );
+        assert!(
+            sanitized[0]["orderActivityCollection"][0]
+                .get("quantity")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unknown_activity_variants_emit_sanitized_warning_counts() {
+        let input = json!([{
+            "orderId": 42,
+            "accountNumber": "123456789",
+            "orderActivityCollection": [
+                {"activityType": "EXECUTION", "executionType": "REBOOKED"},
+                {"activityType": "EXECUTION", "executionType": "REBOOKED"},
+                {"activityType": "BROKER_NOTE"}
+            ]
+        }]);
+
+        let sanitized = sanitize_order(input);
+        let warnings = order_activity_warnings(&sanitized);
+
+        assert_eq!(
+            warnings,
+            vec![
+                OrderActivityWarning {
+                    code: "order.activity_unknown_variant",
+                    field: "activityType",
+                    value: "BROKER_NOTE".to_string(),
+                    count: 1,
+                },
+                OrderActivityWarning {
+                    code: "order.activity_unknown_variant",
+                    field: "executionType",
+                    value: "REBOOKED".to_string(),
+                    count: 2,
+                },
+            ]
+        );
+
+        let warning_json = serde_json::to_value(warnings).unwrap();
+        assert!(!warning_json.to_string().contains("123456789"));
+        assert!(!warning_json.to_string().contains("42"));
     }
 
     // --- full pipeline ---

@@ -275,7 +275,7 @@ schwab-agent order cancel --account HASH 12345678                # cancel + veri
 schwab-agent order cancel --account HASH --order-id 12345678     # equivalent named-flag form
 ```
 
-List flags: `--account` (optional hash or nickname), `--all-accounts` (explicit cross-account mode, conflicts with `--account`), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Without `--account` or `--all-accounts`, `order list` uses the primary account and falls back to the first account. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}`.
+List flags: `--account` (optional hash or nickname), `--all-accounts` (explicit cross-account mode, conflicts with `--account`), `--status`, `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, `--max-results`. Without `--account` or `--all-accounts`, `order list` uses the primary account and falls back to the first account. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N}` plus optional sanitized `warnings` when Schwab returns unrecognized order activity enum values. Canceled order activities are preserved and do not make listing fail.
 
 ## Post-Action Verification
 

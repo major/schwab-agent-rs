@@ -133,21 +133,19 @@ enum RangeBoundary {
 /// Use `--all-accounts` to preserve the legacy cross-account listing behavior.
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {
     let provider = auth::provider(cli)?;
-    let client = provider.client().await?;
     let token = provider.token().await?;
 
     let (from_time, to_time) = normalize_list_range(args, OffsetDateTime::now_utc())?;
 
-    let mut options = schwab::OrderListOptions::new(&from_time, &to_time);
-    if let Some(n) = args.max_results {
-        options = options.max_results(i64::from(n));
-    }
-    if let Some(status) = &args.status {
-        options = options.status(status);
-    }
+    let query = raw::OrderListQuery {
+        from_entered_time: &from_time,
+        to_entered_time: &to_time,
+        max_results: args.max_results,
+        status: args.status.as_deref(),
+    };
 
-    let orders: Vec<schwab::Order> = if args.all_accounts {
-        client.get_all_orders(options).await?
+    let raw_orders = if args.all_accounts {
+        raw::fetch_order_list(&token, None, &query).await?
     } else {
         let account_hash = match &args.account {
             Some(selector) => {
@@ -157,16 +155,23 @@ pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value
             }
             None => crate::account::resolve_default_account_hash(&token).await?,
         };
-        client.get_orders(&account_hash, options).await?
+        raw::fetch_order_list(&token, Some(&account_hash), &query).await?
     };
 
-    let count = orders.len();
-    let data = raw::sanitize_order(serde_json::to_value(&orders)?);
+    let orders = raw::sanitize_order(raw::normalize_order_list_response(raw_orders));
+    let count = orders.as_array().map_or(0, Vec::len);
+    let warnings = raw::order_activity_warnings(&orders);
 
-    Ok(serde_json::json!({
-        "orders": data,
+    let mut output = serde_json::json!({
+        "orders": orders,
         "count": count,
-    }))
+    });
+
+    if !warnings.is_empty() {
+        output["warnings"] = serde_json::to_value(warnings)?;
+    }
+
+    Ok(output)
 }
 
 /// Retrieves a single order by account and order ID.
