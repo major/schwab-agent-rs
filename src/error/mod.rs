@@ -24,6 +24,16 @@ pub enum AppError {
     /// Account selection or validation failed.
     #[error("{0}")]
     AccountValidation(String),
+    /// Schwab returned an account response envelope this CLI could not decode.
+    #[error("unexpected Schwab {endpoint} response shape: expected {expected}; got {shape}")]
+    AccountResponseShape {
+        /// Human-readable account endpoint label.
+        endpoint: &'static str,
+        /// Expected sanitized shape description.
+        expected: &'static str,
+        /// Sanitized shape metadata from the actual response.
+        shape: String,
+    },
     /// The symbol does not have listed options or was not found.
     #[error("symbol has no listed options: {symbol}")]
     OptionsSymbolNotFound { symbol: String },
@@ -66,6 +76,7 @@ impl AppError {
             Self::Schwab(error) => classify_schwab_error(error).0,
             Self::OrderValidation(_) => 10,
             Self::AccountValidation(_) => 10,
+            Self::AccountResponseShape { .. } => 20,
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => 10,
             Self::MarketValidation { .. } => 10,
             Self::TaInsufficientData { .. } | Self::TaInvalidInterval { .. } => 10,
@@ -86,6 +97,7 @@ impl AppError {
             Self::Schwab(error) => classify_schwab_error(error).1,
             Self::OrderValidation(_) => "order.validation_failed",
             Self::AccountValidation(_) => "account.validation_failed",
+            Self::AccountResponseShape { .. } => "account.response_shape",
             Self::OptionsSymbolNotFound { .. } => "options.symbol_not_found",
             Self::OptionsValidation { .. } => "options.validation_failed",
             Self::MarketValidation { .. } => "market.validation_failed",
@@ -106,7 +118,7 @@ impl AppError {
             Self::Json(_) => "json",
             Self::Schwab(error) => classify_schwab_error(error).2,
             Self::OrderValidation(_) | Self::Preview(_) => "order",
-            Self::AccountValidation(_) => "account",
+            Self::AccountValidation(_) | Self::AccountResponseShape { .. } => "account",
             Self::OptionsSymbolNotFound { .. } | Self::OptionsValidation { .. } => "options",
             Self::MarketValidation { .. } => "market",
             Self::TaInsufficientData { .. }
@@ -138,6 +150,9 @@ impl AppError {
             Self::AccountValidation(_) => {
                 Some("Run account summary to list available account hashes and nicknames.")
             }
+            Self::AccountResponseShape { .. } => Some(
+                "Schwab returned an account response shape this version does not recognize. Update schwab-agent-rs or report the sanitized shape metadata.",
+            ),
             Self::MarketValidation { .. } => Some(
                 "Use --fields with one or more supported quote output fields, for example sym,last,pct,vol.",
             ),

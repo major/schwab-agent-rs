@@ -166,7 +166,7 @@ Commands output raw JSON data payloads directly (no wrapper). Errors output an `
 - 4 = HTTP status errors
 - 10 = input/validation/config errors (includes account.validation_failed, market.validation_failed, ta.insufficient_data, ta.invalid_interval, config.mutable_disabled)
 - 11 = preview errors
-- 20 = IO/JSON/config errors (includes ta.calculation_error)
+- 20 = IO/JSON/config errors (includes account.response_shape, ta.calculation_error)
 
 ## Key Dependencies
 
