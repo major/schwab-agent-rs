@@ -34,7 +34,6 @@ impl Cli {
             Command::Market(MarketCommand::History(_)) => "market.history",
             Command::Market(MarketCommand::Quote(_)) => "market.quote",
             Command::Order(_) => "order",
-            Command::Stock(_) => "stock",
             Command::Ta(TaCommand::Dashboard(_)) => "ta.dashboard",
             Command::Ta(TaCommand::ExpectedMove(_)) => "ta.expected-move",
             Command::Account(_) => "account",
@@ -56,12 +55,9 @@ pub enum Command {
     /// Option chain, screening, and contract lookup workflows.
     #[command(subcommand)]
     Option(OptionCommand),
-    /// Option order construction, preview, and placement workflows.
+    /// Unified order construction, preview, placement, and lifecycle workflows.
     #[command(subcommand)]
-    Order(crate::order::OrderCommand),
-    /// Stock (equity) order construction, preview, and placement workflows.
-    #[command(subcommand)]
-    Stock(crate::equity::EquityCommand),
+    Order(OrderCommand),
     /// Technical analysis indicator workflows.
     #[command(subcommand)]
     Ta(TaCommand),
@@ -471,28 +467,201 @@ impl AccountArgs {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Unified order command types
+// ---------------------------------------------------------------------------
+
+/// Unified order command covering equity and option workflows.
+///
+/// Use `order equity` for stock trades and `order option` for option trades.
+/// The `get`, `cancel`, `replace`, `place-from-preview`, `preview-raw`, and
+/// `place-raw` subcommands work with orders of any type.
+#[derive(Debug, Subcommand)]
+pub enum OrderCommand {
+    /// Equity (stock) order: buy, sell, sell-short, buy-to-cover.
+    #[command(subcommand)]
+    Equity(EquityArgs),
+    /// Option order: buy-to-open, sell-to-open, buy-to-close, sell-to-close (OCC symbol required).
+    #[command(subcommand)]
+    Option(OptionArgs),
+    /// Get active orders or one exact order.
+    #[command(
+        after_help = "LLM selection guide:\n  schwab-agent order get\n      Get all active/open orders across every linked account. Use this first when you need current open orders and do not already know the account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME\n      Get all active/open orders for one account. Use this when you already know which account to inspect.\n\n  schwab-agent order get --include-inactive\n      Get active plus inactive orders across every linked account. Any returned status not listed in the active_statuses output field is treated as inactive. Add --account to limit this to one account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME --order ORDER_ID\n      Get one exact order. Use this only when both the account and order ID are known. Do not combine --order with discovery filters such as --recent, --from, --to, or --include-inactive.\n\nActive statuses are exact strings returned in the active_statuses output field."
+    )]
+    Get(crate::order::lifecycle::OrderGetArgs),
+    /// Cancel an order by ID.
+    ///
+    /// After cancellation, verifies the status via a follow-up GET so
+    /// the agent can confirm the order was actually canceled.
+    Cancel(crate::order::lifecycle::OrderCancelArgs),
+    /// Replace an existing order.
+    Replace(ReplaceArgs),
+    /// Place an order from a previously saved preview digest.
+    #[command(name = "place-from-preview")]
+    PlaceFromPreview(PlaceFromPreviewArgs),
+    /// Preview an arbitrary JSON order payload (for brackets, OCO, etc.).
+    #[command(name = "preview-raw")]
+    PreviewRaw(PreviewRawArgs),
+    /// Place an arbitrary JSON order payload (for brackets, OCO, etc.).
+    #[command(name = "place-raw")]
+    PlaceRaw(PlaceRawArgs),
+}
+
+/// Equity (stock) order actions.
+#[derive(Debug, Subcommand)]
+pub enum EquityArgs {
+    /// Buy shares.
+    Buy(EquityOrderArgs),
+    /// Sell shares.
+    Sell(EquityOrderArgs),
+    /// Sell shares short.
+    #[command(name = "sell-short")]
+    SellShort(EquityOrderArgs),
+    /// Buy to cover a short position.
+    #[command(name = "buy-to-cover")]
+    BuyToCover(EquityOrderArgs),
+}
+
+/// Arguments for an equity order action.
+#[derive(Debug, Args)]
+pub struct EquityOrderArgs {
+    /// Ticker symbol (e.g. AAPL, SPY).
+    pub symbol: String,
+    /// Number of shares.
+    #[arg(short, long)]
+    pub quantity: f64,
+    /// Limit price (omit for market order; with --stop becomes stop-limit).
+    #[arg(short, long)]
+    pub price: Option<f64>,
+    /// Stop trigger price (omit for market/limit; with --price becomes stop-limit).
+    #[arg(long)]
+    pub stop: Option<f64>,
+    #[command(flatten)]
+    pub common: CommonOrderArgs,
+}
+
+/// Option order actions using OCC symbols.
+#[derive(Debug, Subcommand)]
+pub enum OptionArgs {
+    /// Buy to open a new option position.
+    #[command(name = "buy-to-open")]
+    BuyToOpen(OptionOrderArgs),
+    /// Sell to open a new option position.
+    #[command(name = "sell-to-open")]
+    SellToOpen(OptionOrderArgs),
+    /// Buy to close an existing option position.
+    #[command(name = "buy-to-close")]
+    BuyToClose(OptionOrderArgs),
+    /// Sell to close an existing option position.
+    #[command(name = "sell-to-close")]
+    SellToClose(OptionOrderArgs),
+}
+
+/// Arguments for an option order action.
+#[derive(Debug, Args)]
+pub struct OptionOrderArgs {
+    /// OCC option symbol (e.g. AAPL  250117C00150000).
+    pub symbol: String,
+    /// Number of contracts.
+    #[arg(short, long)]
+    pub quantity: f64,
+    /// Limit price (omit for market order).
+    #[arg(short, long)]
+    pub price: Option<f64>,
+    #[command(flatten)]
+    pub common: CommonOrderArgs,
+}
+
+/// Arguments shared by equity and option order actions.
+#[derive(Debug, Args)]
+pub struct CommonOrderArgs {
+    /// Account hash or nickname (omit for dry-run mode).
+    #[arg(short, long)]
+    pub account: Option<String>,
+    /// Trading session.
+    #[arg(long, default_value = "normal")]
+    pub session: crate::shared::SessionChoice,
+    /// Order duration.
+    #[arg(long, default_value = "day")]
+    pub duration: crate::shared::DurationChoice,
+    /// Save order preview to disk (requires --account).
+    #[arg(long)]
+    pub save_preview: bool,
+    /// Preview order first, then place automatically (requires --account).
+    #[arg(long)]
+    pub preview_first: bool,
+}
+
+/// Arguments for `order replace`.
+#[derive(Debug, Args)]
+pub struct ReplaceArgs {
+    /// Account hash or nickname.
+    #[arg(short, long)]
+    pub account: String,
+    /// Order ID to replace.
+    #[arg(long, value_parser = clap::value_parser!(i64).range(1..))]
+    pub order_id: i64,
+    /// The replacement order.
+    #[command(subcommand)]
+    pub order_spec: ReplaceOrderSpec,
+}
+
+/// Replacement order payload (equity or option).
+#[derive(Debug, Subcommand)]
+pub enum ReplaceOrderSpec {
+    /// Replace with an equity order.
+    #[command(subcommand)]
+    Equity(EquityArgs),
+    /// Replace with an option order.
+    #[command(subcommand)]
+    Option(OptionArgs),
+}
+
+/// Arguments for `order place-from-preview`.
+#[derive(Debug, Args)]
+pub struct PlaceFromPreviewArgs {
+    /// Account hash or nickname.
+    #[arg(short, long)]
+    pub account: String,
+    /// SHA-256 digest from a previous preview --save-preview run.
+    #[arg(short, long)]
+    pub digest: String,
+}
+
+/// Arguments for `order preview-raw`.
+#[derive(Debug, Args)]
+pub struct PreviewRawArgs {
+    /// Account hash or nickname.
+    #[arg(long)]
+    pub account: String,
+    /// Save preview to disk after previewing.
+    #[arg(long)]
+    pub save_preview: bool,
+    /// Complete order JSON payload (for brackets, OCO, triggers, etc.).
+    #[arg(long)]
+    pub json: String,
+}
+
+/// Arguments for `order place-raw`.
+#[derive(Debug, Args)]
+pub struct PlaceRawArgs {
+    /// Account hash or nickname.
+    #[arg(long)]
+    pub account: String,
+    /// Complete order JSON payload.
+    #[arg(long)]
+    pub json: String,
+}
+
 #[cfg(test)]
 mod tests {
     use clap::{CommandFactory, Parser, error::ErrorKind};
 
-    use super::{Cli, Command, MarketCommand, TaCommand};
+    use super::{Cli, Command, MarketCommand, OrderCommand, TaCommand};
 
     #[test]
     fn command_tree_is_valid() {
         Cli::command().debug_assert();
-    }
-
-    #[test]
-    fn order_place_help_points_equities_to_stock_place() {
-        let mut command = Cli::command();
-        let help = command
-            .find_subcommand_mut("order")
-            .and_then(|order| order.find_subcommand_mut("place"))
-            .map(|place| place.render_long_help().to_string())
-            .expect("order place command exists");
-
-        assert!(help.contains("order place is for option strategies only"));
-        assert!(help.contains("schwab-agent stock place"));
     }
 
     #[test]
@@ -942,6 +1111,211 @@ mod tests {
         assert_eq!(args.symbols, ["AAPL"]);
         assert_eq!(args.interval, "daily");
         assert_eq!(args.points, 5);
+    }
+
+    #[test]
+    fn parse_order_equity_buy_dry_run() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "equity", "buy", "AAPL", "-q", "10"]);
+
+        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command
+        else {
+            panic!("expected order equity buy command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.quantity, 10.0);
+        assert!(args.price.is_none());
+        assert!(args.stop.is_none());
+        assert!(args.common.account.is_none());
+        assert!(!args.common.save_preview);
+    }
+
+    #[test]
+    fn parse_order_equity_buy_with_account_and_price() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "equity",
+            "buy",
+            "AAPL",
+            "-q",
+            "10",
+            "-p",
+            "150.00",
+            "-a",
+            "HASH123",
+        ]);
+
+        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command
+        else {
+            panic!("expected order equity buy command");
+        };
+        assert_eq!(args.symbol, "AAPL");
+        assert_eq!(args.quantity, 10.0);
+        assert_eq!(args.price, Some(150.0));
+        assert_eq!(args.common.account.as_deref(), Some("HASH123"));
+    }
+
+    #[test]
+    fn parse_order_equity_sell_short() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "equity",
+            "sell-short",
+            "TSLA",
+            "-q",
+            "5",
+            "--stop",
+            "200.00",
+        ]);
+
+        let Command::Order(OrderCommand::Equity(super::EquityArgs::SellShort(args))) = cli.command
+        else {
+            panic!("expected order equity sell-short command");
+        };
+        assert_eq!(args.symbol, "TSLA");
+        assert_eq!(args.quantity, 5.0);
+        assert_eq!(args.stop, Some(200.0));
+    }
+
+    #[test]
+    fn parse_order_option_buy_to_open() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "option",
+            "buy-to-open",
+            "AAPL  250117C00150000",
+            "-q",
+            "1",
+            "-p",
+            "3.50",
+            "-a",
+            "HASH123",
+            "--save-preview",
+        ]);
+
+        let Command::Order(OrderCommand::Option(super::OptionArgs::BuyToOpen(args))) = cli.command
+        else {
+            panic!("expected order option buy-to-open command");
+        };
+        assert_eq!(args.symbol, "AAPL  250117C00150000");
+        assert_eq!(args.quantity, 1.0);
+        assert_eq!(args.price, Some(3.50));
+        assert_eq!(args.common.account.as_deref(), Some("HASH123"));
+        assert!(args.common.save_preview);
+    }
+
+    #[test]
+    fn parse_order_option_sell_to_close() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "option",
+            "sell-to-close",
+            "AAPL  250117C00150000",
+            "-q",
+            "2",
+        ]);
+
+        let Command::Order(OrderCommand::Option(super::OptionArgs::SellToClose(args))) =
+            cli.command
+        else {
+            panic!("expected order option sell-to-close command");
+        };
+        assert_eq!(args.symbol, "AAPL  250117C00150000");
+        assert_eq!(args.quantity, 2.0);
+        assert!(args.price.is_none());
+        assert!(args.common.account.is_none());
+    }
+
+    #[test]
+    fn parse_order_replace() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "replace",
+            "-a",
+            "HASH123",
+            "--order-id",
+            "12345",
+            "equity",
+            "buy",
+            "AAPL",
+            "-q",
+            "10",
+            "-p",
+            "150.00",
+        ]);
+
+        let Command::Order(OrderCommand::Replace(args)) = cli.command else {
+            panic!("expected order replace command");
+        };
+        assert_eq!(args.account, "HASH123");
+        assert_eq!(args.order_id, 12345);
+    }
+
+    #[test]
+    fn parse_order_place_from_preview() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "place-from-preview",
+            "-a",
+            "HASH123",
+            "-d",
+            "abc123",
+        ]);
+
+        let Command::Order(OrderCommand::PlaceFromPreview(args)) = cli.command else {
+            panic!("expected order place-from-preview command");
+        };
+        assert_eq!(args.account, "HASH123");
+        assert_eq!(args.digest, "abc123");
+    }
+
+    #[test]
+    fn parse_order_preview_raw() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "preview-raw",
+            "--account",
+            "HASH123",
+            "--json",
+            "{\"orderType\":\"LIMIT\"}",
+            "--save-preview",
+        ]);
+
+        let Command::Order(OrderCommand::PreviewRaw(args)) = cli.command else {
+            panic!("expected order preview-raw command");
+        };
+        assert_eq!(args.account, "HASH123");
+        assert!(args.save_preview);
+    }
+
+    #[test]
+    fn parse_order_place_raw() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "place-raw",
+            "--account",
+            "HASH123",
+            "--json",
+            "{\"orderType\":\"MARKET\"}",
+        ]);
+
+        let Command::Order(OrderCommand::PlaceRaw(args)) = cli.command else {
+            panic!("expected order place-raw command");
+        };
+        assert_eq!(args.account, "HASH123");
+    }
+
+    #[test]
+    fn stock_subcommand_is_removed() {
+        let result = Cli::try_parse_from(["schwab-agent", "stock", "buy", "AAPL", "-q", "10"]);
+        assert!(result.is_err());
     }
 
     #[test]
