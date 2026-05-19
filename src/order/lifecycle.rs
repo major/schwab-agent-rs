@@ -130,8 +130,8 @@ enum RangeBoundary {
 // ---------------------------------------------------------------------------
 
 /// Retrieves active/all orders or a single order by account and order ID.
-pub(crate) async fn handle_get(cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
-    let provider = auth::provider(cli)?;
+pub(crate) async fn handle_get(_cli: &Cli, args: &OrderGetArgs) -> Result<Value, AppError> {
+    let provider = auth::provider()?;
     let token = provider.token().await?;
 
     if let Some(order_id) = args.order_id {
@@ -219,9 +219,9 @@ fn is_active_order(order: &Value) -> bool {
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
-pub(crate) async fn handle_cancel(cli: &Cli, args: &OrderCancelArgs) -> Result<Value, AppError> {
+pub(crate) async fn handle_cancel(_cli: &Cli, args: &OrderCancelArgs) -> Result<Value, AppError> {
     crate::config::require_mutable_enabled()?;
-    let client = auth::provider(cli)?.client().await?;
+    let client = auth::provider()?.client().await?;
     let order_id = args.order_id();
     client.cancel_order(&args.account, order_id).await?;
 

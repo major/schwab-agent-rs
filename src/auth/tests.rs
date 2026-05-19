@@ -1,10 +1,53 @@
+use std::{ffi::OsString, path::Path};
+
 use clap::Parser;
 use schwab::auth::{TokenData, TokenFile};
 
 use crate::cli::Cli;
 
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+
+    fn set_path(key: &'static str, value: &Path) -> Self {
+        let previous = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self { key, previous }
+    }
+
+    fn remove(key: &'static str) -> Self {
+        let previous = std::env::var_os(key);
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match self.previous.as_ref() {
+            Some(value) => unsafe { std::env::set_var(self.key, value) },
+            None => unsafe { std::env::remove_var(self.key) },
+        }
+    }
+}
+
 #[test]
 fn status_does_not_expose_token_secrets() {
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     let token_path = temp_dir.path().join("token.json");
     let token_file = TokenFile {
@@ -24,14 +67,9 @@ fn status_does_not_expose_token_secrets() {
     )
     .expect("write token file");
 
-    let cli = Cli::parse_from([
-        "schwab-agent",
-        "--token",
-        token_path.to_str().expect("token path utf-8"),
-        "auth",
-        "status",
-    ]);
-    let output = super::status(&cli).expect("build auth status").to_string();
+    let _token_path = EnvVarGuard::set_path("SCHWAB_TOKEN_PATH", &token_path);
+    let _cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
+    let output = super::status().expect("build auth status").to_string();
 
     assert!(output.contains("token_present"));
     assert!(!output.contains("secret-access-token"));
@@ -218,11 +256,14 @@ fn auth_status_from_token_file_no_expires_at() {
 
 #[test]
 fn build_config_missing_client_id() {
-    let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+    let _client_id = EnvVarGuard::remove("SCHWAB_CLIENT_ID");
+    let _client_secret = EnvVarGuard::remove("SCHWAB_CLIENT_SECRET");
+    let _callback_url = EnvVarGuard::remove("SCHWAB_CALLBACK_URL");
     let dir = tempfile::tempdir().unwrap();
     let empty_config = dir.path().join("config.json");
     std::fs::write(&empty_config, "{}").unwrap();
-    let err = super::build_config_from(&cli, &empty_config).unwrap_err();
+    let err = super::build_config_from(&empty_config).unwrap_err();
     match err {
         crate::error::AppError::MissingAuthConfig(field) => {
             assert_eq!(field, "client_id");
@@ -233,11 +274,14 @@ fn build_config_missing_client_id() {
 
 #[test]
 fn build_config_missing_client_secret() {
-    let cli = Cli::parse_from(["schwab-agent", "--client-id", "my-id", "auth", "status"]);
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+    let _client_id = EnvVarGuard::set("SCHWAB_CLIENT_ID", "my-id");
+    let _client_secret = EnvVarGuard::remove("SCHWAB_CLIENT_SECRET");
+    let _callback_url = EnvVarGuard::remove("SCHWAB_CALLBACK_URL");
     let dir = tempfile::tempdir().unwrap();
     let empty_config = dir.path().join("config.json");
     std::fs::write(&empty_config, "{}").unwrap();
-    let err = super::build_config_from(&cli, &empty_config).unwrap_err();
+    let err = super::build_config_from(&empty_config).unwrap_err();
     match err {
         crate::error::AppError::MissingAuthConfig(field) => {
             assert_eq!(field, "client_secret");
@@ -248,22 +292,24 @@ fn build_config_missing_client_secret() {
 
 #[test]
 fn build_config_valid() {
-    let cli = Cli::parse_from([
-        "schwab-agent",
-        "--client-id",
-        "my-client-id",
-        "--client-secret",
-        "my-client-secret",
-        "auth",
-        "status",
-    ]);
-    let config = super::build_config(&cli);
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+    let _client_id = EnvVarGuard::set("SCHWAB_CLIENT_ID", "my-client-id");
+    let _client_secret = EnvVarGuard::set("SCHWAB_CLIENT_SECRET", "my-client-secret");
+    let _callback_url = EnvVarGuard::remove("SCHWAB_CALLBACK_URL");
+    let dir = tempfile::tempdir().unwrap();
+    let empty_config = dir.path().join("config.json");
+    std::fs::write(&empty_config, "{}").unwrap();
+
+    let config = super::build_config_from(&empty_config);
     assert!(config.is_ok());
 }
 
 #[test]
 fn build_config_falls_back_to_config_file() {
-    let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+    let _client_id = EnvVarGuard::remove("SCHWAB_CLIENT_ID");
+    let _client_secret = EnvVarGuard::remove("SCHWAB_CLIENT_SECRET");
+    let _callback_url = EnvVarGuard::remove("SCHWAB_CALLBACK_URL");
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.json");
     std::fs::write(
@@ -271,21 +317,16 @@ fn build_config_falls_back_to_config_file() {
         r#"{"client_id": "from-file", "client_secret": "secret-from-file"}"#,
     )
     .unwrap();
-    let config = super::build_config_from(&cli, &config_path);
+    let config = super::build_config_from(&config_path);
     assert!(config.is_ok());
 }
 
 #[test]
-fn build_config_cli_overrides_config_file() {
-    let cli = Cli::parse_from([
-        "schwab-agent",
-        "--client-id",
-        "from-cli",
-        "--client-secret",
-        "secret-from-cli",
-        "auth",
-        "status",
-    ]);
+fn build_config_env_overrides_config_file() {
+    let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+    let _client_id = EnvVarGuard::set("SCHWAB_CLIENT_ID", "from-env");
+    let _client_secret = EnvVarGuard::set("SCHWAB_CLIENT_SECRET", "secret-from-env");
+    let _callback_url = EnvVarGuard::remove("SCHWAB_CALLBACK_URL");
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config.json");
     std::fs::write(
@@ -293,8 +334,8 @@ fn build_config_cli_overrides_config_file() {
         r#"{"client_id": "from-file", "client_secret": "secret-from-file"}"#,
     )
     .unwrap();
-    let config = super::build_config_from(&cli, &config_path).unwrap();
-    // AuthConfig redacts fields, but we can verify it built successfully with CLI values
+    let config = super::build_config_from(&config_path).unwrap();
+    // AuthConfig redacts fields, but we can verify it built successfully with env values
     // by confirming no error was returned when both sources are present
     assert!(format!("{config:?}").contains("<redacted>"));
 }

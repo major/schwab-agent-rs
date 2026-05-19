@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
 /// Agent-oriented JSON CLI porcelain for Charles Schwab workflows.
@@ -14,22 +12,6 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
     help_template = "{name} {version}\n{about-section}\n{usage-heading} {usage}\n\n{all-args}{tab}"
 )]
 pub struct Cli {
-    /// Path to the OAuth token file.
-    #[arg(long, global = true, env = "SCHWAB_TOKEN_PATH")]
-    pub token: Option<PathBuf>,
-
-    /// Schwab app client ID. Also read from SCHWAB_CLIENT_ID.
-    #[arg(long, global = true, env = "SCHWAB_CLIENT_ID")]
-    pub client_id: Option<String>,
-
-    /// Schwab app client secret. Also read from SCHWAB_CLIENT_SECRET.
-    #[arg(long, global = true, env = "SCHWAB_CLIENT_SECRET")]
-    pub client_secret: Option<String>,
-
-    /// OAuth callback URL registered with Schwab.
-    #[arg(long, global = true, env = "SCHWAB_CALLBACK_URL")]
-    pub callback_url: Option<String>,
-
     #[command(subcommand)]
     pub command: Command,
 }
@@ -57,12 +39,6 @@ impl Cli {
             Command::Ta(TaCommand::ExpectedMove(_)) => "ta.expected-move",
             Command::Account(_) => "account",
         }
-    }
-
-    /// Returns the token path, falling back to an XDG-style default.
-    #[must_use]
-    pub fn token_path(&self) -> PathBuf {
-        self.token.clone().unwrap_or_else(default_token_path)
     }
 }
 
@@ -495,20 +471,11 @@ impl AccountArgs {
     }
 }
 
-fn default_token_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("schwab-agent-rs")
-        .join("token.json")
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use clap::{CommandFactory, Parser, error::ErrorKind};
 
-    use clap::{CommandFactory, Parser};
-
-    use super::{Cli, Command, MarketCommand, TaCommand, default_token_path};
+    use super::{Cli, Command, MarketCommand, TaCommand};
 
     #[test]
     fn command_tree_is_valid() {
@@ -978,20 +945,15 @@ mod tests {
     }
 
     #[test]
-    fn token_path_uses_explicit_flag() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
+    fn removed_global_credential_flags_are_unknown() {
+        for flag in [
             "--token",
-            "/custom/path/token.json",
-            "auth",
-            "status",
-        ]);
-        assert_eq!(cli.token_path(), PathBuf::from("/custom/path/token.json"));
-    }
-
-    #[test]
-    fn default_token_path_ends_with_expected_suffix() {
-        let path = default_token_path();
-        assert!(path.ends_with("schwab-agent-rs/token.json"));
+            "--client-id",
+            "--client-secret",
+            "--callback-url",
+        ] {
+            let result = Cli::try_parse_from(["schwab-agent", flag, "value", "auth", "status"]);
+            assert_eq!(result.unwrap_err().kind(), ErrorKind::UnknownArgument);
+        }
     }
 }

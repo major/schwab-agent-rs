@@ -1,6 +1,6 @@
 # schwab-agent CLI
 
-Structured JSON CLI for Charles Schwab API. All output is raw JSON data payloads. Set env vars once, then most commands need zero flags.
+Structured JSON CLI for Charles Schwab API. All output is raw JSON data payloads. Set env vars or config once, then most commands need zero flags.
 
 > **Disclaimer:** This project is unofficial and is not affiliated with, endorsed by, or connected to Charles Schwab, TD Ameritrade, or thinkorswim in any way.
 
@@ -10,8 +10,11 @@ Structured JSON CLI for Charles Schwab API. All output is raw JSON data payloads
 export SCHWAB_CLIENT_ID="..."
 export SCHWAB_CLIENT_SECRET="..."
 # Token path defaults to $XDG_CONFIG_DIR/schwab-agent-rs/token.json
+# Override with SCHWAB_TOKEN_PATH if needed
 # Callback URL defaults to https://127.0.0.1:8182
 ```
+
+Credentials can also live in `~/.config/schwab-agent/config.json`. Environment variables take precedence over config file values.
 
 ## Release Notes
 

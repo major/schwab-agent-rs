@@ -19,81 +19,48 @@ use crate::error::AppError;
 const REFRESH_TOKEN_MAX_AGE_SECONDS: i64 = 561_600;
 
 /// Dispatches an `auth` subcommand to the appropriate handler.
-pub(crate) async fn handle(cli: &Cli, command: &AuthCommand) -> Result<Value, AppError> {
+pub(crate) async fn handle(_cli: &Cli, command: &AuthCommand) -> Result<Value, AppError> {
     match command {
-        AuthCommand::Status => status(cli),
-        AuthCommand::Login(args) => login(cli, args).await,
-        AuthCommand::LoginUrl(args) => login_url(cli, args),
-        AuthCommand::Exchange(args) => exchange(cli, args).await,
-        AuthCommand::Refresh => refresh(cli).await,
+        AuthCommand::Status => status(),
+        AuthCommand::Login(args) => login(args).await,
+        AuthCommand::LoginUrl(args) => login_url(args),
+        AuthCommand::Exchange(args) => exchange(args).await,
+        AuthCommand::Refresh => refresh().await,
     }
 }
 
-/// Builds an `AuthConfig` from CLI flags, falling back to the shared config
-/// file at `~/.config/schwab-agent/config.json` for any values not provided
-/// via CLI args or environment variables.
+/// Builds an `AuthConfig` from environment variables and the shared config file
+/// at `~/.config/schwab-agent/config.json`.
 ///
-/// Resolution order for each credential: CLI arg / env var > config file.
+/// Resolution order for each credential: environment variable > config file.
 /// The callback URL additionally falls back to the hardcoded default.
-pub(crate) fn build_config(cli: &Cli) -> Result<AuthConfig, AppError> {
-    let config = crate::config::load_agent_config()?;
-    let client_id = cli
-        .client_id
-        .as_deref()
-        .or(config.client_id.as_deref())
-        .ok_or(AppError::MissingAuthConfig("client_id"))?;
-    let client_secret = cli
-        .client_secret
-        .as_deref()
-        .or(config.client_secret.as_deref())
-        .ok_or(AppError::MissingAuthConfig("client_secret"))?;
-    let callback_url = cli
-        .callback_url
-        .as_deref()
-        .or(config.callback_url.as_deref())
-        .unwrap_or(crate::config::DEFAULT_CALLBACK_URL);
-    Ok(AuthConfig::new(client_id, client_secret, callback_url)?)
+pub(crate) fn build_config() -> Result<AuthConfig, AppError> {
+    let (client_id, client_secret, callback_url) = crate::config::resolve_credentials()?;
+    Ok(AuthConfig::new(&client_id, &client_secret, &callback_url)?)
 }
 
 /// Testable variant of [`build_config`] that loads agent config from a specific path
 /// instead of the default location, isolating tests from the real config file.
 #[cfg(test)]
-pub(crate) fn build_config_from(
-    cli: &Cli,
-    config_path: &std::path::Path,
-) -> Result<AuthConfig, AppError> {
-    let config = crate::config::load_agent_config_from(config_path)?;
-    let client_id = cli
-        .client_id
-        .as_deref()
-        .or(config.client_id.as_deref())
-        .ok_or(AppError::MissingAuthConfig("client_id"))?;
-    let client_secret = cli
-        .client_secret
-        .as_deref()
-        .or(config.client_secret.as_deref())
-        .ok_or(AppError::MissingAuthConfig("client_secret"))?;
-    let callback_url = cli
-        .callback_url
-        .as_deref()
-        .or(config.callback_url.as_deref())
-        .unwrap_or(crate::config::DEFAULT_CALLBACK_URL);
-    Ok(AuthConfig::new(client_id, client_secret, callback_url)?)
+pub(crate) fn build_config_from(config_path: &std::path::Path) -> Result<AuthConfig, AppError> {
+    let (client_id, client_secret, callback_url) =
+        crate::config::resolve_credentials_from(config_path)?;
+    Ok(AuthConfig::new(&client_id, &client_secret, &callback_url)?)
 }
 
 /// Returns a `Provider` backed by the saved token file, failing if the file does not exist.
-pub(crate) fn provider(cli: &Cli) -> Result<Provider, AppError> {
-    let token_path = cli.token_path();
+pub(crate) fn provider() -> Result<Provider, AppError> {
+    let token_path = crate::config::token_path();
     require_token_file(&token_path)?;
-    Ok(Provider::from_token_file(build_config(cli)?, token_path)?)
+    Ok(Provider::from_token_file(build_config()?, token_path)?)
 }
 
 /// Reads the token file and returns a JSON summary of its current auth state.
 ///
 /// Returns a "missing" status object when no token file exists, rather than an error,
 /// so callers can inspect the state without special-casing the absent-file case.
-fn status(cli: &Cli) -> Result<Value, AppError> {
-    let token_path = cli.token_path();
+fn status() -> Result<Value, AppError> {
+    let token_path = crate::config::token_path();
     if !token_path.exists() {
         return Ok(to_value(AuthStatus::missing(&token_path))?);
     }
@@ -109,12 +76,12 @@ fn status(cli: &Cli) -> Result<Value, AppError> {
 ///
 /// Optionally opens the authorization URL in the system browser. Writes the resulting
 /// token to disk via `FileTokenStore` so subsequent commands can reuse it.
-async fn login(cli: &Cli, args: &LoginArgs) -> Result<Value, AppError> {
-    let token_path = cli.token_path();
+async fn login(args: &LoginArgs) -> Result<Value, AppError> {
+    let token_path = crate::config::token_path();
     if let Some(parent) = token_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let session = start_login(build_config(cli)?, FileTokenStore::new(&token_path))?
+    let session = start_login(build_config()?, FileTokenStore::new(&token_path))?
         .timeout(Some(Duration::from_secs(args.timeout)));
     let url = session.auth_context().authorization_url.clone();
     let browser_opened = if args.no_browser {
@@ -135,8 +102,9 @@ async fn login(cli: &Cli, args: &LoginArgs) -> Result<Value, AppError> {
 ///
 /// Useful for headless or scripted flows where the caller handles the redirect manually
 /// and will later call `exchange` with the redirect URL.
-fn login_url(cli: &Cli, args: &LoginUrlArgs) -> Result<Value, AppError> {
-    let context = authorize_url(&build_config(cli)?)?;
+fn login_url(args: &LoginUrlArgs) -> Result<Value, AppError> {
+    let token_path = crate::config::token_path();
+    let context = authorize_url(&build_config()?)?;
     let browser_opened = if args.no_browser {
         false
     } else {
@@ -146,7 +114,7 @@ fn login_url(cli: &Cli, args: &LoginUrlArgs) -> Result<Value, AppError> {
         authorization_url: context.authorization_url,
         callback_url: context.callback_url,
         state: context.state,
-        token_path: cli.token_path().display().to_string(),
+        token_path: token_path.display().to_string(),
         browser_opened,
     })?)
 }
@@ -154,21 +122,16 @@ fn login_url(cli: &Cli, args: &LoginUrlArgs) -> Result<Value, AppError> {
 /// Exchanges a Schwab redirect URL for an access/refresh token pair and saves it to disk.
 ///
 /// This is the second step of the manual login flow started by `login_url`.
-async fn exchange(cli: &Cli, args: &AuthExchangeArgs) -> Result<Value, AppError> {
-    let config = crate::config::load_agent_config()?;
-    let callback_url = cli
-        .callback_url
-        .clone()
-        .or(config.callback_url)
-        .unwrap_or_else(|| crate::config::DEFAULT_CALLBACK_URL.to_string());
+async fn exchange(args: &AuthExchangeArgs) -> Result<Value, AppError> {
+    let (_client_id, _client_secret, callback_url) = crate::config::resolve_credentials()?;
     let context = AuthContext {
         callback_url,
         authorization_url: String::new(),
         state: args.state.clone(),
     };
-    let token_path = cli.token_path();
+    let token_path = crate::config::token_path();
     exchange_redirect_url(
-        build_config(cli)?,
+        build_config()?,
         FileTokenStore::new(&token_path),
         &context,
         &args.redirect_url,
@@ -181,9 +144,9 @@ async fn exchange(cli: &Cli, args: &AuthExchangeArgs) -> Result<Value, AppError>
 }
 
 /// Uses the saved refresh token to obtain a new access token and overwrites the token file.
-async fn refresh(cli: &Cli) -> Result<Value, AppError> {
-    let token_path = cli.token_path();
-    let token_file = provider(cli)?.refresh().await?;
+async fn refresh() -> Result<Value, AppError> {
+    let token_path = crate::config::token_path();
+    let token_file = provider()?.refresh().await?;
     Ok(to_value(RefreshOutput {
         refreshed: true,
         token_path: token_path.display().to_string(),

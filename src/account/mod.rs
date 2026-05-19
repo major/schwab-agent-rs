@@ -14,9 +14,9 @@ use crate::error::AppError;
 const DEFAULT_POSITION_FIELDS: [&str; 6] = ["sym", "long_qty", "avg", "mktval", "pnl", "pnlpct"];
 
 /// Dispatches the account command and returns its JSON value.
-pub(crate) async fn handle(cli: &Cli, args: &AccountArgs) -> Result<Value, AppError> {
+pub(crate) async fn handle(_cli: &Cli, args: &AccountArgs) -> Result<Value, AppError> {
     if let Some(selector) = &args.selector {
-        let provider = auth::provider(cli)?;
+        let provider = auth::provider()?;
         let token = provider.token().await?;
         let data = resolve_account(&token, selector).await?;
         return Ok(to_value(data)?);
@@ -28,7 +28,7 @@ pub(crate) async fn handle(cli: &Cli, args: &AccountArgs) -> Result<Value, AppEr
     } else {
         Some(selected_position_fields(args.fields.as_deref())?)
     };
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let token = provider.token().await?;
     let data = run_summary(
         &token,

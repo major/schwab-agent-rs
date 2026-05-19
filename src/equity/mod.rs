@@ -356,14 +356,14 @@ fn do_build(action: &EquityAction) -> Result<Value, AppError> {
 
 /// Previews the order via the Schwab API.
 async fn do_preview(
-    cli: &Cli,
+    _cli: &Cli,
     account: &str,
     action: &EquityAction,
     save: bool,
     command_name: &str,
 ) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -387,9 +387,9 @@ async fn do_preview(
 }
 
 /// Places the order directly via the Schwab API with post-place verification.
-async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Value, AppError> {
+async fn do_place(_cli: &Cli, account: &str, action: &EquityAction) -> Result<Value, AppError> {
     let order = build_equity_order(action)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -412,8 +412,8 @@ async fn do_place(cli: &Cli, account: &str, action: &EquityAction) -> Result<Val
 
 /// Places an order from a previously saved preview digest with post-place
 /// verification.
-async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
-    let provider = auth::provider(cli)?;
+async fn do_place_from_preview(_cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -449,13 +449,13 @@ fn parse_raw_json(json: &str) -> Result<Value, AppError> {
 
 /// Previews a raw JSON order payload via the Schwab API.
 async fn do_preview_raw(
-    cli: &Cli,
+    _cli: &Cli,
     account: &str,
     json: &str,
     save: bool,
 ) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -478,9 +478,9 @@ async fn do_preview_raw(
 
 /// Places a raw JSON order payload via the Schwab API with post-place
 /// verification.
-async fn do_place_raw(cli: &Cli, account: &str, json: &str) -> Result<Value, AppError> {
+async fn do_place_raw(_cli: &Cli, account: &str, json: &str) -> Result<Value, AppError> {
     let order = parse_raw_json(json)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;

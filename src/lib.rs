@@ -55,7 +55,7 @@ pub async fn execute(cli: Cli) -> Result<Value, AppError> {
         return equity::handle(&cli, command).await;
     }
     if let Command::Analyze(args) = &cli.command {
-        let client = auth::provider(&cli)?.client().await?;
+        let client = auth::provider()?.client().await?;
         return analyze::analyze(&client, args).await;
     }
 
@@ -63,7 +63,7 @@ pub async fn execute(cli: Cli) -> Result<Value, AppError> {
         Command::Auth(command) => auth::handle(&cli, command).await,
         Command::Market(command) => market::handle(&cli, command).await,
         Command::Option(command) => {
-            let client = auth::provider(&cli)?.client().await?;
+            let client = auth::provider()?.client().await?;
             match command {
                 OptionCommand::Expirations(args) => {
                     options::expirations::handle(&client, &args.symbol).await
@@ -75,7 +75,7 @@ pub async fn execute(cli: Cli) -> Result<Value, AppError> {
         }
         Command::Analyze(_) => unreachable!("handled above"),
         Command::Ta(ta_cmd) => {
-            let client = auth::provider(&cli)?.client().await?;
+            let client = auth::provider()?.client().await?;
             match ta_cmd {
                 TaCommand::Dashboard(args) => ta::dashboard(&client, args).await,
                 TaCommand::ExpectedMove(args) => {
@@ -104,9 +104,35 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{ffi::OsString, path::Path};
+
     use clap::Parser;
 
     use crate::cli::Cli;
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.as_ref() {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
 
     #[test]
     fn write_json_writes_json_followed_by_newline() {
@@ -138,16 +164,15 @@ mod tests {
         assert!(super::write_json(&mut writer, &value).is_err());
     }
 
-    #[tokio::test]
-    async fn run_returns_nonzero_on_missing_token_file() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
-            "auth",
-            "refresh",
-            "--token",
-            "/tmp/schwab-test-nonexistent-token-file",
-        ]);
-        let code = super::run(cli).await;
+    #[test]
+    fn run_returns_nonzero_on_missing_token_file() {
+        let _lock = crate::config::TEST_ENV_LOCK.lock().unwrap();
+        let token_path = Path::new("/tmp/schwab-test-nonexistent-token-file");
+        let _token_path = EnvVarGuard::set_path("SCHWAB_TOKEN_PATH", token_path);
+        let cli = Cli::parse_from(["schwab-agent", "auth", "refresh"]);
+        let code = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::run(cli));
         assert_eq!(code, 3);
     }
 }

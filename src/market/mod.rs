@@ -15,14 +15,14 @@ pub(crate) async fn handle(cli: &Cli, command: &MarketCommand) -> Result<Value, 
 }
 
 /// Fetches price history candles for a single symbol and returns them as JSON.
-async fn history(cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
+async fn history(_cli: &Cli, args: &HistoryArgs) -> Result<Value, AppError> {
     let selected_fields = if args.all_fields {
         None
     } else {
         Some(selected_history_fields(args.fields.as_deref())?)
     };
 
-    let client = auth::provider(cli)?.client().await?;
+    let client = auth::provider()?.client().await?;
     let mut options = PriceHistoryOptions::new();
     if let Some(period_type) = &args.period_type {
         options = options.parameter("periodType", period_type);
@@ -196,14 +196,14 @@ fn selected_history_field_value(candle: &Value, field: &str) -> Value {
 
 /// Fetches quotes for the requested symbols from the Schwab API and returns either
 /// compact row output or the full flattened [`QuoteSummary`] object list.
-async fn quote(cli: &Cli, args: &QuoteArgs) -> Result<Value, AppError> {
+async fn quote(_cli: &Cli, args: &QuoteArgs) -> Result<Value, AppError> {
     let selected_fields = if args.all_fields {
         None
     } else {
         Some(selected_quote_fields(args.fields.as_deref())?)
     };
 
-    let client = auth::provider(cli)?.client().await?;
+    let client = auth::provider()?.client().await?;
     let quotes = if let Some(fields) = &args.api_fields {
         client
             .get_quotes_with_options(&args.symbols, QuoteOptions::new().fields(fields))
