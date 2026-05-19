@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::{Value, json, to_value};
+use serde_json::{Value, to_value};
 
 use schwab::{
     Account, AccountNumberHash, AccountsInstrument, CashBalance, MarginBalance, SecuritiesAccount,
@@ -10,33 +10,20 @@ use crate::auth;
 use crate::cli::{AccountArgs, Cli};
 use crate::error::AppError;
 
-/// Default position fields for row-based output.
-const DEFAULT_POSITION_FIELDS: [&str; 6] = ["sym", "long_qty", "avg", "mktval", "pnl", "pnlpct"];
-
 /// Dispatches the account command and returns its JSON value.
 pub(crate) async fn handle(_cli: &Cli, args: &AccountArgs) -> Result<Value, AppError> {
-    if let Some(selector) = &args.selector {
+    if let Some(selector) = &args.selector
+        && !args.requests_summary()
+    {
         let provider = auth::provider()?;
         let token = provider.token().await?;
         let data = resolve_account(&token, selector).await?;
         return Ok(to_value(data)?);
     }
 
-    // Validate fields before fetching account data to fail fast on bad input.
-    let position_fields = if args.all_fields {
-        None
-    } else {
-        Some(selected_position_fields(args.fields.as_deref())?)
-    };
     let provider = auth::provider()?;
     let token = provider.token().await?;
-    let data = run_summary(
-        &token,
-        args.include_positions(),
-        args.with_positions_only,
-        position_fields.as_deref(),
-    )
-    .await?;
+    let data = run_summary(&token, args.include_positions(), args.selector.as_deref()).await?;
     Ok(to_value(data)?)
 }
 
@@ -143,22 +130,14 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
 /// When `with_positions` is true, account data is fetched with position details
 /// included. Otherwise, positions are omitted from the output.
 ///
-/// When `with_positions_only` is true, accounts that have no positions are
-/// excluded from the result entirely. This implicitly enables position
-/// retrieval regardless of the `with_positions` value.
-///
 /// # Errors
 ///
 /// Returns an `AppError` when any Schwab API call fails.
 pub async fn run_summary(
     bearer_token: &str,
     with_positions: bool,
-    with_positions_only: bool,
-    position_fields: Option<&[&str]>,
+    selector: Option<&str>,
 ) -> Result<AccountSummaryData, AppError> {
-    // Filtering by positions requires fetching them.
-    let effective_positions = with_positions || with_positions_only;
-
     let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
     let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
     let prefs: Vec<UserPreferenceAccount> = preferences
@@ -166,18 +145,47 @@ pub async fn run_summary(
         .filter_map(|preference| preference.accounts)
         .flatten()
         .collect();
+    let selected_hash = selector
+        .map(|value| resolve_account_from_data(&hashes, &prefs, value))
+        .transpose()?
+        .map(|account| account.account_hash);
 
-    let fields = effective_positions.then_some("positions");
+    let fields = with_positions.then_some("positions");
     let accounts = crate::raw::fetch_accounts(bearer_token, fields).await?;
 
-    Ok(render_summary_from_data(
-        &accounts,
-        &hashes,
-        &prefs,
-        effective_positions,
-        with_positions_only,
-        position_fields,
-    ))
+    let mut summary = render_summary_from_data(&accounts, &hashes, &prefs, with_positions);
+    if let Some(account_hash) = selected_hash.as_deref() {
+        retain_account_summary(&mut summary, &account_hash);
+        ensure_selected_account_rendered(&summary, account_hash)?;
+    }
+
+    Ok(summary)
+}
+
+/// Keeps only the account row matching `account_hash`.
+pub(crate) fn retain_account_summary(summary: &mut AccountSummaryData, account_hash: &str) {
+    summary
+        .accounts
+        .retain(|account| account.account_hash == account_hash);
+}
+
+/// Validates that a selected account survived summary rendering.
+///
+/// # Errors
+///
+/// Returns [`AppError::AccountValidation`] when Schwab account details could not
+/// be joined back to the resolved account hash.
+pub(crate) fn ensure_selected_account_rendered(
+    summary: &AccountSummaryData,
+    account_hash: &str,
+) -> Result<(), AppError> {
+    if summary.accounts.is_empty() {
+        return Err(AppError::AccountValidation(format!(
+            "account '{account_hash}' resolved but no account summary data was available"
+        )));
+    }
+
+    Ok(())
 }
 
 /// Pure helper that builds an [`AccountSummaryData`] from pre-fetched API data.
@@ -185,25 +193,18 @@ pub async fn run_summary(
 /// Joins accounts to hashes via `account_number`, enriches with user preferences,
 /// and extracts balance summaries based on account type (margin vs cash).
 ///
-/// When `with_positions_only` is true, accounts whose `positions` field is
-/// `None`, an empty array, or a row-based object with zero rows are excluded
-/// from the output.
-///
-/// When `position_fields` is `Some`, positions use row-based output with the
-/// given field selection. When `None`, positions use full compact objects.
+/// Position output uses compact objects with all curated fields.
 #[must_use]
 pub(crate) fn render_summary_from_data(
     accounts: &[Account],
     hashes: &[AccountNumberHash],
     prefs: &[UserPreferenceAccount],
     with_positions: bool,
-    with_positions_only: bool,
-    position_fields: Option<&[&str]>,
 ) -> AccountSummaryData {
     let rows = accounts
         .iter()
         .filter_map(|account| {
-            let fields = extract_account_fields(account, with_positions, position_fields)?;
+            let fields = extract_account_fields(account, with_positions)?;
             let AccountFields {
                 account_number,
                 variant_type,
@@ -212,9 +213,6 @@ pub(crate) fn render_summary_from_data(
                 balances,
                 positions,
             } = fields;
-            if with_positions_only && !has_positions(&positions) {
-                return None;
-            }
             let hash_value = find_hash_value(account_number.as_deref(), hashes)?;
             let pref = matching_preference(account_number.as_deref(), prefs);
             let mut row = build_account_row(hash_value, pref);
@@ -235,35 +233,15 @@ pub(crate) fn render_summary_from_data(
     AccountSummaryData { accounts: rows }
 }
 
-/// Returns `true` when positions contains at least one entry.
-///
-/// Handles both row-based (`{rows: [...]}`) and array-based (`[...]`) formats.
-#[must_use]
-fn has_positions(positions: &Option<Value>) -> bool {
-    positions.as_ref().is_some_and(|v| match v {
-        Value::Array(arr) => !arr.is_empty(),
-        Value::Object(obj) => obj
-            .get("rows")
-            .and_then(Value::as_array)
-            .is_some_and(|rows| !rows.is_empty()),
-        _ => false,
-    })
-}
-
 /// Extracts the account number, balance summary, and optional positions from an
 /// [`Account`] by dispatching on the securities account variant.
 ///
-/// When `position_fields` is `Some`, positions are formatted as row-based output
-/// using [`select_position_fields`]. When `None`, positions use full compact
-/// objects via [`compact_position`].
+/// When position output is requested, positions use compact objects via
+/// [`compact_position`].
 ///
 /// Returns `None` when the account has no `securities_account` field.
 #[must_use]
-fn extract_account_fields(
-    account: &Account,
-    with_positions: bool,
-    position_fields: Option<&[&str]>,
-) -> Option<AccountFields> {
+fn extract_account_fields(account: &Account, with_positions: bool) -> Option<AccountFields> {
     match account.securities_account.as_ref()? {
         SecuritiesAccount::Margin(margin) => {
             let balances = margin
@@ -271,7 +249,7 @@ fn extract_account_fields(
                 .as_ref()
                 .map(|b| AccountBalances::Margin(margin_balance_summary(b)));
             let positions = with_positions
-                .then(|| format_positions(&margin.positions, position_fields))
+                .then(|| format_positions(&margin.positions))
                 .flatten();
             Some(AccountFields {
                 account_number: margin.account_number.clone(),
@@ -288,7 +266,7 @@ fn extract_account_fields(
                 .as_ref()
                 .map(|b| AccountBalances::Cash(cash_balance_summary(b)));
             let positions = with_positions
-                .then(|| format_positions(&cash.positions, position_fields))
+                .then(|| format_positions(&cash.positions))
                 .flatten();
             Some(AccountFields {
                 account_number: cash.account_number.clone(),
@@ -325,79 +303,14 @@ fn cash_balance_summary(balance: &CashBalance) -> CashBalanceSummary {
     }
 }
 
-/// Formats positions using either row-based or compact object output.
-///
-/// When `position_fields` is `Some`, returns row-based output with `columns`,
-/// `rows`, and `rowCount`. When `None`, returns an array of compact objects.
+/// Formats positions as compact objects with all curated fields.
 ///
 /// Returns `None` when positions are absent, preserving the distinction between
 /// "not requested" and "empty list".
 #[must_use]
-fn format_positions(
-    positions: &Option<Vec<schwab::Position>>,
-    position_fields: Option<&[&str]>,
-) -> Option<Value> {
+fn format_positions(positions: &Option<Vec<schwab::Position>>) -> Option<Value> {
     let pos = positions.as_ref()?;
-    match position_fields {
-        Some(fields) => Some(select_position_fields(pos, fields)),
-        None => Some(Value::Array(pos.iter().map(compact_position).collect())),
-    }
-}
-
-/// Builds row-based position output with `columns`, `rows`, and `rowCount`.
-#[must_use]
-fn select_position_fields(positions: &[schwab::Position], fields: &[&str]) -> Value {
-    let columns: Vec<Value> = fields.iter().map(|f| json!(*f)).collect();
-    let rows: Vec<Value> = positions
-        .iter()
-        .map(|pos| {
-            let instrument = pos.instrument.as_ref().map(instrument_summary);
-            let row: Vec<Value> = fields
-                .iter()
-                .map(|f| position_field_value(pos, instrument.as_ref(), f))
-                .collect();
-            Value::Array(row)
-        })
-        .collect();
-    json!({
-        "columns": columns,
-        "rows": rows,
-        "rowCount": rows.len(),
-    })
-}
-
-/// Extracts a single field value from a position by canonical field name.
-///
-/// The caller precomputes `instrument` once per position so it is reused
-/// across all fields in the row.
-#[must_use]
-fn position_field_value(
-    position: &schwab::Position,
-    instrument: Option<&InstrumentSummary>,
-    field: &str,
-) -> Value {
-    match field {
-        "sym" => instrument
-            .and_then(|i| i.symbol.as_deref())
-            .map_or(Value::Null, |s| json!(s)),
-        "desc" => instrument
-            .and_then(|i| i.description.as_deref())
-            .map_or(Value::Null, |s| json!(s)),
-        "type" => instrument
-            .and_then(|i| i.asset_type.as_deref())
-            .map_or(Value::Null, |s| json!(s)),
-        "long_qty" => position.long_quantity.map_or(Value::Null, |v| json!(v)),
-        "short_qty" => position.short_quantity.map_or(Value::Null, |v| json!(v)),
-        "avg" => position.average_price.map_or(Value::Null, |v| json!(v)),
-        "mktval" => position.market_value.map_or(Value::Null, |v| json!(v)),
-        "pnl" => position
-            .current_day_profit_loss
-            .map_or(Value::Null, |v| json!(v)),
-        "pnlpct" => position
-            .current_day_profit_loss_percentage
-            .map_or(Value::Null, |v| json!(v)),
-        _ => Value::Null,
-    }
+    Some(Value::Array(pos.iter().map(compact_position).collect()))
 }
 
 /// Builds a compact JSON value from a single position, including only fields
@@ -409,6 +322,15 @@ fn compact_position(position: &schwab::Position) -> Value {
     if let Some(instrument) = position.instrument.as_ref().map(instrument_summary) {
         if let Some(symbol) = instrument.symbol {
             map.insert("symbol".to_string(), serde_json::json!(symbol));
+        }
+        if let Some(cusip) = instrument.cusip {
+            map.insert("cusip".to_string(), serde_json::json!(cusip));
+        }
+        if let Some(instrument_id) = instrument.instrument_id {
+            map.insert(
+                "instrument_id".to_string(),
+                serde_json::json!(instrument_id),
+            );
         }
         if let Some(description) = instrument.description {
             map.insert("description".to_string(), serde_json::json!(description));
@@ -446,105 +368,10 @@ fn compact_position(position: &schwab::Position) -> Value {
     Value::Object(map)
 }
 
-/// Parses and validates a comma-separated field list for position output.
-///
-/// Returns canonical field names. When `requested` is `None`, returns the
-/// default field set.
-///
-/// # Errors
-///
-/// Returns `AppError::AccountValidation` when any field name is unrecognized
-/// or the list is empty.
-pub(crate) fn selected_position_fields(
-    requested: Option<&str>,
-) -> Result<Vec<&'static str>, AppError> {
-    let Some(input) = requested else {
-        return Ok(DEFAULT_POSITION_FIELDS.to_vec());
-    };
-
-    let fields: Vec<&str> = input.split(',').map(str::trim).collect();
-    if fields.is_empty() || fields.iter().all(|f| f.is_empty()) {
-        return Err(AppError::AccountValidation(
-            "empty field list; omit --fields to use defaults".to_string(),
-        ));
-    }
-
-    validate_position_fields(&fields)?;
-
-    Ok(fields
-        .into_iter()
-        .filter(|f| !f.is_empty())
-        .filter_map(|f| canonical_position_field(f))
-        .collect())
-}
-
-/// Validates that all requested fields are recognized position field names.
-fn validate_position_fields(fields: &[&str]) -> Result<(), AppError> {
-    let unknown: Vec<&str> = fields
-        .iter()
-        .filter(|f| !f.is_empty())
-        .filter(|f| canonical_position_field(f).is_none())
-        .copied()
-        .collect();
-
-    if unknown.is_empty() {
-        Ok(())
-    } else {
-        let available = available_position_fields();
-        Err(AppError::AccountValidation(format!(
-            "unknown position field(s): {}; available: {}",
-            unknown.join(", "),
-            available.join(", ")
-        )))
-    }
-}
-
-/// Maps a field name or alias to its canonical short name.
-#[must_use]
-pub(crate) fn canonical_position_field(name: &str) -> Option<&'static str> {
-    match name {
-        "sym" | "symbol" => Some("sym"),
-        "desc" | "description" => Some("desc"),
-        "type" | "asset_type" => Some("type"),
-        "long_qty" | "long_quantity" => Some("long_qty"),
-        "short_qty" | "short_quantity" => Some("short_qty"),
-        "avg" | "average_price" => Some("avg"),
-        "mktval" | "market_value" => Some("mktval"),
-        "pnl" | "current_day_profit_loss" => Some("pnl"),
-        "pnlpct" | "current_day_profit_loss_percentage" => Some("pnlpct"),
-        _ => None,
-    }
-}
-
-/// Returns a sorted list of all accepted position field aliases.
-#[must_use]
-pub(crate) fn available_position_fields() -> Vec<&'static str> {
-    let mut fields = vec![
-        "sym",
-        "symbol",
-        "desc",
-        "description",
-        "type",
-        "asset_type",
-        "long_qty",
-        "long_quantity",
-        "short_qty",
-        "short_quantity",
-        "avg",
-        "average_price",
-        "mktval",
-        "market_value",
-        "pnl",
-        "current_day_profit_loss",
-        "pnlpct",
-        "current_day_profit_loss_percentage",
-    ];
-    fields.sort_unstable();
-    fields
-}
-
 struct InstrumentSummary {
     symbol: Option<String>,
+    cusip: Option<String>,
+    instrument_id: Option<i64>,
     description: Option<String>,
     asset_type: Option<String>,
 }
@@ -557,6 +384,8 @@ fn instrument_summary(instrument: &AccountsInstrument) -> InstrumentSummary {
         ($value:expr) => {
             InstrumentSummary {
                 symbol: $value.symbol.clone(),
+                cusip: $value.cusip.clone(),
+                instrument_id: $value.instrument_id,
                 description: $value.description.clone(),
                 asset_type: $value
                     .asset_type

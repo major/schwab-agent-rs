@@ -69,8 +69,19 @@ pub enum Command {
     ///
     /// Without a selector, returns account hashes, nicknames, balance summaries
     /// (margin or cash), day-trader and closing-only flags, and optionally open
-    /// positions. With a selector, resolves an account hash or nickname to its
-    /// canonical account hash.
+    /// positions. With a selector alone, resolves an account hash or nickname to
+    /// its canonical account hash. With a selector plus `--positions`, returns
+    /// the matching account summary.
+    #[command(after_help = "LLM workflow:\n  \
+        schwab-agent account\n      \
+        List account hashes, nicknames, account types, balance summaries, and account flags for every linked account.\n\n  \
+        schwab-agent account --positions\n      \
+        Include holdings as compact position objects for every linked account. Use this before allocation or order-planning decisions.\n\n  \
+        schwab-agent account HASH_OR_NICKNAME\n      \
+        Resolve a raw account hash or unique nickname to the canonical hash for --account on stock and order commands.\n\n  \
+        schwab-agent account HASH_OR_NICKNAME --positions\n      \
+        Return the selected account summary plus compact position objects instead of only resolving the hash.\n\n\
+        Position objects include symbol, description, asset_type, long_quantity, short_quantity, average_price, market_value, current_day_profit_loss, and current_day_profit_loss_percentage when Schwab provides them.")]
     Account(AccountArgs),
 }
 
@@ -441,33 +452,26 @@ pub struct QuoteArgs {
 #[derive(Debug, Args)]
 pub struct AccountArgs {
     /// Account hash or nickname to resolve. Omit to list account summaries.
-    #[arg(conflicts_with_all = ["positions", "with_positions_only", "fields", "all_fields"])]
     pub selector: Option<String>,
 
     /// Include individual positions in each account summary.
     #[arg(long)]
     pub positions: bool,
-
-    /// Only include accounts that hold at least one position (implies --positions).
-    #[arg(long)]
-    pub with_positions_only: bool,
-
-    /// Comma-separated list of position fields to include (row-based output).
-    #[arg(long, conflicts_with = "all_fields", requires = "positions")]
-    pub fields: Option<String>,
-
-    /// Return all position fields as full compact objects instead of row-based output.
-    #[arg(long, conflicts_with = "fields", requires = "positions")]
-    pub all_fields: bool,
 }
 
 impl AccountArgs {
     /// Whether position data should be fetched from the API.
     ///
-    /// Returns `true` when either `--positions` or `--with-positions-only` is set.
+    /// Returns `true` when position data is explicitly requested.
     #[must_use]
     pub fn include_positions(&self) -> bool {
-        self.positions || self.with_positions_only
+        self.positions
+    }
+
+    /// Whether the selector should return an account summary instead of a hash resolution.
+    #[must_use]
+    pub fn requests_summary(&self) -> bool {
+        self.include_positions()
     }
 }
 
@@ -507,6 +511,22 @@ mod tests {
         assert_eq!(help.matches("LLM selection guide:").count(), 1);
         assert!(help.contains("active_statuses output field"));
         assert!(help.contains("discovery filters"));
+    }
+
+    #[test]
+    fn account_help_includes_llm_workflow() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("account")
+            .map(|account| account.render_long_help().to_string())
+            .expect("account command exists");
+
+        assert_eq!(help.matches("LLM workflow:").count(), 1);
+        assert!(!help.contains("Examples:"));
+        assert!(!help.contains("--with-positions-only"));
+        assert!(help.contains("schwab-agent account --positions"));
+        assert!(help.contains("compact position objects"));
+        assert!(help.contains("--account"));
     }
 
     #[test]
@@ -730,81 +750,32 @@ mod tests {
         };
         assert!(args.selector.is_none());
         assert!(args.positions);
-        assert!(!args.with_positions_only);
-        assert!(args.fields.is_none());
-        assert!(!args.all_fields);
         assert!(args.include_positions());
     }
 
     #[test]
-    fn parse_account_positions_with_fields() {
-        let cli = Cli::parse_from([
-            "schwab-agent",
-            "account",
-            "--positions",
-            "--fields",
-            "sym,mktval,pnl",
-        ]);
+    fn parse_account_with_positions_only_is_rejected() {
+        let err = Cli::try_parse_from(["schwab-agent", "account", "--with-positions-only"])
+            .expect_err("removed account flag should be rejected");
 
-        let Command::Account(args) = cli.command else {
-            panic!("expected account command");
-        };
-        assert!(args.selector.is_none());
-        assert!(args.positions);
-        assert_eq!(args.fields.as_deref(), Some("sym,mktval,pnl"));
-        assert!(!args.all_fields);
+        assert!(err.to_string().contains("--with-positions-only"));
     }
 
     #[test]
-    fn parse_account_positions_all_fields() {
-        let cli = Cli::parse_from(["schwab-agent", "account", "--positions", "--all-fields"]);
+    fn parse_account_fields_is_rejected() {
+        let err =
+            Cli::try_parse_from(["schwab-agent", "account", "--positions", "--fields", "sym"])
+                .expect_err("removed account flag should be rejected");
 
-        let Command::Account(args) = cli.command else {
-            panic!("expected account command");
-        };
-        assert!(args.selector.is_none());
-        assert!(args.positions);
-        assert!(args.all_fields);
-        assert!(args.fields.is_none());
+        assert!(err.to_string().contains("--fields"));
     }
 
     #[test]
-    fn parse_account_fields_conflicts_with_all_fields() {
-        let result = Cli::try_parse_from([
-            "schwab-agent",
-            "account",
-            "--positions",
-            "--fields",
-            "sym",
-            "--all-fields",
-        ]);
-        assert!(result.is_err());
-    }
+    fn parse_account_all_fields_is_rejected() {
+        let err = Cli::try_parse_from(["schwab-agent", "account", "--positions", "--all-fields"])
+            .expect_err("removed account flag should be rejected");
 
-    #[test]
-    fn parse_account_fields_requires_positions() {
-        let result = Cli::try_parse_from(["schwab-agent", "account", "--fields", "sym"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_account_all_fields_requires_positions() {
-        let result = Cli::try_parse_from(["schwab-agent", "account", "--all-fields"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn parse_account_with_positions_only() {
-        let cli = Cli::parse_from(["schwab-agent", "account", "--with-positions-only"]);
-
-        let Command::Account(args) = cli.command else {
-            panic!("expected account command");
-        };
-        assert!(args.selector.is_none());
-        assert!(!args.positions);
-        assert!(args.with_positions_only);
-        // --with-positions-only implies --positions
-        assert!(args.include_positions());
+        assert!(err.to_string().contains("--all-fields"));
     }
 
     #[test]
@@ -828,33 +799,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_selector_conflicts_with_positions() {
-        let result = Cli::try_parse_from(["schwab-agent", "account", "Trading", "--positions"]);
-        assert!(result.is_err());
+    fn parse_account_selector_with_positions() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "--positions", "Trading"]);
+
+        let Command::Account(args) = cli.command else {
+            panic!("expected account command");
+        };
+        assert_eq!(args.selector.as_deref(), Some("Trading"));
+        assert!(args.positions);
+        assert!(args.include_positions());
+        assert!(args.requests_summary());
     }
 
     #[test]
-    fn parse_account_selector_conflicts_with_with_positions_only() {
-        let result = Cli::try_parse_from([
-            "schwab-agent",
-            "account",
-            "Trading",
-            "--with-positions-only",
-        ]);
-        assert!(result.is_err());
-    }
+    fn parse_account_selector_before_positions() {
+        let cli = Cli::parse_from(["schwab-agent", "account", "Trading", "--positions"]);
 
-    #[test]
-    fn parse_account_selector_conflicts_with_fields() {
-        let result = Cli::try_parse_from([
-            "schwab-agent",
-            "account",
-            "Trading",
-            "--positions",
-            "--fields",
-            "sym",
-        ]);
-        assert!(result.is_err());
+        let Command::Account(args) = cli.command else {
+            panic!("expected account command");
+        };
+        assert_eq!(args.selector.as_deref(), Some("Trading"));
+        assert!(args.positions);
+        assert!(args.requests_summary());
     }
 
     #[test]

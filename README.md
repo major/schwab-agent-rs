@@ -96,18 +96,16 @@ schwab-agent market history SPY --all-fields
 
 Account discovery, balances, positions, and resolution for LLM agents.
 
-Use `account` without a selector to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands. Pass an account hash or nickname as the optional selector to resolve it to the canonical hash.
+Use `account` without a selector to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands. Pass an account hash or nickname as the optional selector to resolve it to the canonical hash. Add `--positions` with a selector when you want the selected account summary plus holdings instead of hash resolution.
 
 ```bash
 schwab-agent account                                    # list all accounts with balances
-schwab-agent account --positions                        # include holdings (default compact columns)
-schwab-agent account --positions --fields sym,mktval,pnl  # select position columns
-schwab-agent account --positions --all-fields           # all 9 curated position fields as objects
-schwab-agent account --with-positions-only              # only accounts that hold positions
+schwab-agent account --positions                        # include holdings as compact objects
 schwab-agent account Trading                            # resolve nickname to canonical hash
+schwab-agent account Trading --positions                # selected account summary with holdings
 ```
 
-Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
+Position output with `--positions` returns compact position objects with all curated fields Schwab provides: `symbol`, `cusip`, `instrument_id`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Missing Schwab fields are omitted from each position object; `cusip` and `instrument_id` are included when available so positions without symbols still have actionable instrument identifiers.
 
 
 ### stock
