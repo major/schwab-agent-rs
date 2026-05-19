@@ -1943,9 +1943,9 @@ dependencies = [
 
 [[package]]
 name = "schwab"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a6952cedc2a7f2d2aa5a6a554aae32176c3cbd47ca2435b621cdc488b1eef6e"
+checksum = "3fa65ed819af5730f56b99b967a3e3bfe532602a40b4ef4c1171f4a0e60f44c2"
 dependencies = [
  "base64",
  "futures-util",
