@@ -58,7 +58,7 @@ Optional history flags: `--period-type`, `--period`, `--frequency-type`, `--freq
 
 Discover and resolve accounts before placing orders.
 
-Recommended workflow: `account` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
+Recommended workflow: `account` -> choose `account_hash` or nickname -> pass to `--account` in order commands.
 
 ```bash
 schwab-agent account                                    # list accounts with balances
@@ -72,64 +72,87 @@ schwab-agent account ABCDEF1234567890                   # verify a known hash
 
 Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` for curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
 
-The `--account` flag on stock and order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
+The `--account` flag on order commands accepts either the canonical account hash or a unique nickname. Raw account numbers are not supported.
 
 
-## Stock Orders
+## Equity Orders
 
-Buy/sell shares of stock. Recommended LLM workflow: `preview --save-preview` -> `place-from-preview` (same digest/TTL system as option orders).
+Buy/sell shares of stock. Recommended LLM workflow: pass `--account HASH --save-preview` to get a digest, then `order place-from-preview --account HASH --digest DIGEST`.
 
-Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
+The `-a`/`--account` flag controls execution mode:
+- No `--account`: dry-run (prints order JSON, no API call)
+- `--account HASH`: places directly
+- `--account HASH --save-preview`: previews and saves digest
+- `--account HASH --preview-first`: previews then places automatically
 
 Prefer limit orders when practical: pass `--price` for limit orders. Omit `--price` only when a market order is explicitly desired.
 
-### Buy / Sell
-
 ```bash
-# Market order (default)
-schwab-agent stock build buy AAPL --quantity 10
-schwab-agent stock build sell AAPL --quantity 10
+# Dry-run (no account = no API call)
+schwab-agent order equity buy AAPL -q 10
+schwab-agent order equity sell AAPL -q 10
 
-# Limit order
-schwab-agent stock build buy AAPL --quantity 10 --order-type limit --price 180.00
+# Limit order dry-run
+schwab-agent order equity buy AAPL -q 10 --price 180.00
 
-# Stop order
-schwab-agent stock build buy AAPL --quantity 10 --order-type stop --stop-price 170.00
+# Stop order dry-run
+schwab-agent order equity buy AAPL -q 10 --stop 170.00
 
-# Stop-limit order
-schwab-agent stock build buy AAPL --quantity 10 --order-type stop-limit --price 169.00 --stop-price 170.00
-```
+# Stop-limit dry-run
+schwab-agent order equity buy AAPL -q 10 --price 169.00 --stop 170.00
 
-### Short Selling
+# Short selling
+schwab-agent order equity sell-short AAPL -q 10 --price 200.00
+schwab-agent order equity buy-to-cover AAPL -q 10 --price 180.00
 
-```bash
-schwab-agent stock build sell-short AAPL --quantity 10 --order-type limit --price 200.00
-schwab-agent stock build buy-to-cover AAPL --quantity 10 --order-type limit --price 180.00
-```
-
-### Stock Preview and Place
-
-```bash
-# Preview and save digest
-schwab-agent stock preview --account HASH --save-preview buy AAPL --quantity 100 --order-type limit --price 180.00
+# Preview and save digest (recommended LLM workflow)
+schwab-agent order equity buy AAPL -q 100 --price 180.00 -a HASH --save-preview
 
 # Place from saved preview (15-min TTL)
-schwab-agent stock place-from-preview --account HASH --digest DIGEST_HEX
+schwab-agent order place-from-preview -a HASH -d DIGEST_HEX
 
 # Direct place (for explicit human requests only)
-schwab-agent stock place --account HASH buy AAPL --quantity 100 --order-type limit --price 180.00
+schwab-agent order equity buy AAPL -q 100 --price 180.00 -a HASH
 ```
+
+## Option Orders
+
+Single-leg option orders using OCC symbols. Recommended LLM workflow: pass `--account HASH --save-preview` to get a digest, then `order place-from-preview`.
+
+The same `-a`/`--account` execution modes apply as for equity orders.
+
+Prefer limit orders when practical: pass `--price`. Omit `--price` only when a market order is explicitly desired.
+
+```bash
+# Dry-run
+schwab-agent order option buy-to-open "AAPL  250117C00150000" -q 1 --price 5.00
+
+# Preview and save digest
+schwab-agent order option buy-to-open "AAPL  250117C00150000" -q 1 --price 5.00 -a HASH --save-preview
+
+# Place from saved preview
+schwab-agent order place-from-preview -a HASH -d DIGEST_HEX
+
+# Direct place
+schwab-agent order option sell-to-open "SPY   250620P00550000" -q 1 --price 4.50 -a HASH
+
+# Close positions
+schwab-agent order option buy-to-close "AAPL  250117C00150000" -q 1 --price 2.00 -a HASH
+schwab-agent order option sell-to-close "SPY   250620P00550000" -q 1 --price 3.00 -a HASH
+```
+
+For multi-leg orders (spreads, straddles, condors), use `order place-raw` with a raw JSON payload.
 
 ### Complex Orders (Bracket, OCO, Trigger)
 
-Use `preview-raw` and `place-raw` to submit arbitrary JSON payloads for order types that aren't covered by the porcelain commands. This is the path for bracket orders, OCO (one-cancels-other), and triggered orders.
+Use `order preview-raw` and `order place-raw` to submit arbitrary JSON payloads for order types not covered by the porcelain commands. This is the path for bracket orders, OCO (one-cancels-other), and triggered orders.
 
 #### Bracket Order (Buy + Stop Loss + Profit Target)
 
 A bracket order is a `TRIGGER` parent with two `OCO` child orders. When the parent fills, both children activate; when one child fills, the other cancels.
 
 ```bash
-schwab-agent stock preview-raw --account HASH --save-preview --json '{
+schwab-agent order preview-raw --account HASH --save-preview --json '{
   "orderType": "LIMIT",
   "session": "NORMAL",
   "duration": "DAY",
@@ -185,7 +208,7 @@ schwab-agent stock preview-raw --account HASH --save-preview --json '{
 An OCO order places two orders where filling one cancels the other. Use this when you already hold shares and want to set both a stop loss and a profit target.
 
 ```bash
-schwab-agent stock place-raw --account HASH --json '{
+schwab-agent order place-raw --account HASH --json '{
   "orderStrategyType": "OCO",
   "childOrderStrategies": [
     {
@@ -225,7 +248,7 @@ schwab-agent stock place-raw --account HASH --json '{
 A `TRIGGER` parent fires its child orders when the parent fills. Use this when you want a stop loss activated automatically after a buy.
 
 ```bash
-schwab-agent stock place-raw --account HASH --json '{
+schwab-agent order place-raw --account HASH --json '{
   "orderType": "LIMIT",
   "session": "NORMAL",
   "duration": "DAY",
@@ -268,14 +291,14 @@ schwab-agent stock place-raw --account HASH --json '{
 ## Order Lifecycle
 
 ```bash
-schwab-agent order get                                           # active orders across all linked accounts
-schwab-agent order get --account HASH                            # active orders for one account
-schwab-agent order get --account HASH --recent                   # active orders for one account, last 24h
+schwab-agent order get                                                                    # active orders across all linked accounts
+schwab-agent order get --account HASH                                                     # active orders for one account
 schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
-schwab-agent order get --account HASH --order 12345678           # single order by ID
-schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
-schwab-agent order cancel --account HASH 12345678                # cancel + verify
-schwab-agent order cancel --account HASH --order-id 12345678     # equivalent named-flag form
+schwab-agent order get --account HASH --order 12345678                                    # single order by ID
+schwab-agent order replace -a HASH --order-id 12345678 equity buy AAPL -q 10 --price 148.00  # replace with equity order
+schwab-agent order replace -a HASH --order-id 12345678 option buy-to-open "AAPL  250117C00150000" -q 1 --price 4.50
+schwab-agent order cancel --account HASH 12345678                                         # cancel + verify
+schwab-agent order cancel --account HASH --order-id 12345678                              # equivalent named-flag form
 ```
 
 Get discovery flags: `--account` (optional hash or nickname), `--from`/`--to` (`YYYY-MM-DD` or RFC3339), `--recent`, and `--include-inactive`. Without `--account`, `order get` returns active orders across all linked accounts. With `--account`, it returns active orders for that account. Active means the returned `status` exactly matches one of the strings in the `active_statuses` output field; any other status is treated as inactive and kept only with `--include-inactive`. Date-only ranges are inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` includes both end dates and the dates between them. Output: `{"orders": [...], "count": N, "include_inactive": false, "active_statuses": [...]}` plus optional sanitized `warnings` when Schwab returns unrecognized order activity enum values. Canceled order activities are preserved and do not make discovery fail. Specific-order mode is `order get --account HASH --order ORDER_ID`; do not combine `--order` with discovery filters.
@@ -285,78 +308,6 @@ Get discovery flags: `--account` (optional hash or nickname), `--from`/`--to` (`
 All mutable actions (place, place-from-preview, place-raw, replace, cancel) auto-verify by GETting the order after the action. Schwab only returns a Location header on placement and replacement, so this GET is what gives the LLM actual order state.
 
 Response fields: `action` ("place"/"replace"/"cancel"), `order_id`, `location`, `order` (submitted payload), `verification_state` ("verified"/"unverified"), and `verified_order` (full order from GET when available). Optional: `verification_failures` (when unverified), `digest`/`original_command` (for place-from-preview). Unverified failures are included in the response; the order may still have succeeded. Cancel verification is only `verified` when the fetched order status is `CANCELED`.
-
-## Option Orders
-
-Recommended LLM workflow: `preview --save-preview` (with account) -> `place-from-preview` (with digest). This places the exact saved preview payload after the digest, TTL, and account checks pass.
-
-`build` is an optional local dry run for inspecting order JSON. Direct `place` is available for explicit human requests, but LLM agents should prefer saved previews so the submitted payload cannot drift from the reviewed preview.
-
-`replace` rebuilds a safe strategy payload and submits it for an existing order ID, then verifies the resulting order with a follow-up GET. It does not use the preview digest ledger.
-
-Prefer limit-style pricing whenever practical: pass `--price` so single-leg orders use `LIMIT` and multi-leg orders use `NET_DEBIT` or `NET_CREDIT`. Omit `--price` only when a market order is explicitly desired.
-
-### Single-Leg
-
-```bash
-# Required: UNDERLYING --expiration YYYY-MM-DD --strike PRICE
-# Defaults: --quantity 1, --session normal, --duration day
-schwab-agent order build long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.00
-schwab-agent order preview --account HASH --save-preview long-put SPY --expiration 2025-06-20 --strike 550 --price 4.50
-schwab-agent order place-from-preview --account HASH --digest DIGEST_HEX
-```
-
-Strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`
-
-### Vertical Spreads
-
-```bash
-# Uses --low-strike and --high-strike instead of --strike
-schwab-agent order build put-credit-spread SPY --expiration 2025-06-20 --low-strike 540 --high-strike 550 --price 2.50
-```
-
-Strategies: `put-credit-spread`, `call-credit-spread`, `put-debit-spread`, `call-debit-spread`
-
-### Straddles
-
-```bash
-# Same args as single-leg (one --strike for both legs)
-schwab-agent order build long-straddle SPY --expiration 2025-06-20 --strike 550 --price 10.00
-```
-
-Strategies: `long-straddle`, `short-straddle`
-
-### Strangles
-
-```bash
-# Uses --call-strike and --put-strike
-schwab-agent order build long-strangle SPY --expiration 2025-06-20 --call-strike 560 --put-strike 540 --price 8.00
-```
-
-Strategies: `long-strangle`, `short-strangle`
-
-### Iron Condor
-
-```bash
-schwab-agent order build short-iron-condor SPY --expiration 2025-06-20 \
-  --put-long-strike 530 --put-short-strike 540 --call-short-strike 560 --call-long-strike 570 --price 2.00
-```
-
-### Jade Lizard
-
-```bash
-schwab-agent order build jade-lizard SPY --expiration 2025-06-20 \
-  --put-strike 540 --short-call-strike 560 --long-call-strike 570 --price 3.00
-```
-
-### Preview and Place from Preview
-
-```bash
-# Save a preview digest for later execution
-schwab-agent order preview --account HASH --save-preview long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.00
-# Place using saved preview (15-min TTL)
-schwab-agent order place-from-preview --account HASH --digest DIGEST_HEX
-```
 
 ### Duration Aliases
 

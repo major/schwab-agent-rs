@@ -96,7 +96,7 @@ schwab-agent market history SPY --all-fields
 
 Account discovery, balances, positions, and resolution for LLM agents.
 
-Use `account` without a selector to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands. Pass an account hash or nickname as the optional selector to resolve it to the canonical hash.
+Use `account` without a selector to list available account hashes and nicknames, then pass the chosen value to `--account` in order commands. Pass an account hash or nickname as the optional selector to resolve it to the canonical hash.
 
 ```bash
 schwab-agent account                                    # list all accounts with balances
@@ -110,38 +110,36 @@ schwab-agent account Trading                            # resolve nickname to ca
 Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
 
 
-### stock
-
-Equity order workflow with four actions: `buy`, `sell`, `sell-short`, `buy-to-cover`.
-
-Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
-
-Subcommands: `build`, `preview`, `place`, `place-from-preview`, `preview-raw`, `place-raw`.
-
-Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal.
-
-```bash
-schwab-agent stock build buy AAPL --quantity 10 --price 150.00
-schwab-agent stock preview buy AAPL --quantity 10 --price 150.00 --account HASH --save-preview
-schwab-agent stock place-from-preview --account HASH_OR_NICKNAME --digest DIGEST_HEX
-```
-
 ### order
 
-Option order workflow supporting 15 named strategies: `long-call`, `long-put`, `cash-secured-put`, `naked-call`, `sell-covered-call`, `call-debit-spread`, `call-credit-spread`, `put-debit-spread`, `put-credit-spread`, `long-straddle`, `short-straddle`, `long-strangle`, `short-strangle`, `short-iron-condor`, `jade-lizard`.
+Unified order workflow for equity and option placement, lifecycle management, and raw JSON submission.
 
-Subcommands: `build`, `preview`, `place`, `place-from-preview`, `replace`, `get`, `cancel`.
+**Equity actions** (`order equity`): `buy`, `sell`, `sell-short`, `buy-to-cover`. Each hardcodes the Schwab `Instruction` to prevent accidental trade reversal.
 
-Each strategy hardcodes contract type and direction to prevent accidental trade reversal.
+**Option actions** (`order option`): `buy-to-open`, `sell-to-open`, `buy-to-close`, `sell-to-close`. Requires a full OCC symbol (e.g., `AAPL  250117C00150000`). Each hardcodes the Schwab `Instruction`. For multi-leg orders, use `order place-raw`.
 
-Lifecycle commands (`get`, `replace`, `cancel`) manage existing orders. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep orders whose returned status is not active, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` builds a new option strategy payload and submits it to Schwab's replace endpoint for an existing order ID.
+The `-a`/`--account` flag controls execution mode: omit for dry-run (prints order JSON locally), pass `--account` to place directly, add `--save-preview` to preview and save a digest, or add `--preview-first` to preview then place automatically.
+
+Lifecycle subcommands: `get`, `cancel`, `replace`. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep inactive orders, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new payload.
 
 ```bash
+# Equity orders
+schwab-agent order equity buy AAPL -q 10 --price 150.00                          # dry-run
+schwab-agent order equity buy AAPL -q 10 --price 150.00 -a HASH --save-preview   # preview + save digest
+schwab-agent order place-from-preview -a HASH_OR_NICKNAME -d DIGEST_HEX          # place from saved preview
+schwab-agent order equity sell AAPL -q 10 --price 155.00 -a HASH                 # direct place
+
+# Option orders (OCC symbol required)
+schwab-agent order option buy-to-open "AAPL  250117C00150000" -q 1 --price 5.00
+schwab-agent order option buy-to-open "AAPL  250117C00150000" -q 1 --price 5.00 -a HASH --save-preview
+schwab-agent order place-from-preview -a HASH -d DIGEST_HEX
+
+# Lifecycle
 schwab-agent order get
-schwab-agent order get --account HASH_OR_NICKNAME --recent
+schwab-agent order get --account HASH_OR_NICKNAME
 schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
 schwab-agent order get --account HASH_OR_NICKNAME --order 12345678
-schwab-agent order replace --account HASH 12345678 long-call AAPL --expiration 2025-06-20 --strike 200 --price 5.50
+schwab-agent order replace -a HASH --order-id 12345678 equity buy AAPL -q 10 --price 148.00
 schwab-agent order cancel --account HASH --order-id 12345678
 ```
 
@@ -186,10 +184,8 @@ Returns quote + TA dashboard for each symbol. Partial failures include per-symbo
 
 The recommended agent workflow uses tamper-evident previews:
 
-1. `preview --save-preview` - preview the order and save to disk
-2. `place-from-preview` - submit the exact saved payload after SHA-256 digest, 15-minute TTL, and account checks pass
-
-Direct `place` is available for explicit human use, but agents should prefer the preview workflow.
+1. Pass `--account HASH --save-preview` to preview the order and save a digest to disk.
+2. `order place-from-preview --account HASH --digest DIGEST` submits the exact saved payload after SHA-256 digest, 15-minute TTL, and account checks pass.
 
 Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 

@@ -31,18 +31,18 @@ src/
   auth/
     mod.rs         - Auth commands: status, login, login-url, exchange, refresh
     tests.rs       - Auth module tests
-  equity/
-    mod.rs         - Stock order commands: buy, sell, sell-short, buy-to-cover + raw JSON
-    tests.rs       - Equity module tests
   market/
     mod.rs         - Market commands: history, quote. opt_field! macro, summarize_quote(), compact quote/history rows
     tests.rs       - Market module tests
   verify.rs        - Post-action verification: OrderActionResult, verify_order(), action_value()
   order/
-    mod.rs         - Option order dispatch, 15 named option strategies, inline tests
-    builder.rs     - OCC symbol construction (21-char format), inline tests
+    mod.rs         - Order command dispatch, inline tests
+    equity.rs      - Equity order actions: buy, sell, sell-short, buy-to-cover
+    option.rs      - Option order actions: buy-to-open, sell-to-open, buy-to-close, sell-to-close
+    workflow.rs    - Order execution modes: dry-run, place, save-preview, preview-first
+    replace.rs     - Replace an existing order with a new equity or option payload
     preview.rs     - SHA-256 tamper-evident preview with 15-min TTL (shared by equity + order)
-    lifecycle.rs   - Order lifecycle commands: list, get, cancel with post-action verification
+    lifecycle.rs   - Order lifecycle commands: get, cancel with post-action verification
   account/
     mod.rs         - Account command: summary when no selector is provided, resolver when selector is provided, balance renderer
     tests.rs       - Account module tests
@@ -74,35 +74,37 @@ src/
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
 - **account** - Account discovery, balances, positions (with field selection), and resolution
-- **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
-- **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
+- **order** - Unified order workflow: equity and option placement, lifecycle (get, cancel, replace), raw JSON
 - **option** - Option chain data (expirations, chain, screen, contract)
 - **ta** - Technical analysis (dashboard, expected-move)
 - **analyze** - Multi-symbol analysis with partial-failure support
 
-### Stock Actions (4 total)
+### Equity Order Actions (4 total)
 
 buy, sell, sell-short, buy-to-cover
 
-Use `stock place` for equity orders. The `order place` namespace is option-only and intentionally lists option strategies rather than stock actions.
+Use `order equity ACTION` for stock orders. Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. Supports order types: market (default), limit, stop, stop-limit.
 
-Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. Supports order types: market (default), limit, stop, stop-limit.
+`order preview-raw` and `order place-raw` accept arbitrary JSON payloads for complex order types (bracket, OCO, triggered orders) that use recursive `childOrderStrategies`.
 
-`preview-raw` and `place-raw` accept arbitrary JSON payloads for complex order types (bracket, OCO, triggered orders) that use recursive `childOrderStrategies`.
+### Option Order Actions (4 total)
 
-### Option Strategies (15 total)
+buy-to-open, sell-to-open, buy-to-close, sell-to-close
 
-long-call, long-put, cash-secured-put, naked-call, sell-covered-call, call-debit-spread, call-credit-spread, put-debit-spread, put-credit-spread, long-straddle, short-straddle, long-strangle, short-strangle, short-iron-condor, jade-lizard
-
-Each strategy hardcodes contract type and direction to prevent accidental trade reversal.
+Use `order option ACTION OCC_SYMBOL` for single-leg option orders. Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. The OCC symbol must be the full 21-character format (e.g., `AAPL  250117C00150000`). For multi-leg orders, use `order place-raw` with a raw JSON payload.
 
 ### Order Workflow
 
-Recommended LLM workflow: `preview --save-preview` -> `place-from-preview`.
+The `-a`/`--account` flag controls execution mode:
 
-`build` is an optional local dry run. Direct `place` is available for explicit human requests, but LLM agents should use saved previews because `place-from-preview` submits the exact saved preview payload after the SHA-256 digest, 15-minute TTL, and account checks pass. Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
+- No `--account`: dry-run. Prints the OrderBuilder JSON locally, no API call.
+- `--account HASH`: places the order directly.
+- `--account HASH --save-preview`: previews only, saves the preview file, returns the SHA-256 digest.
+- `--account HASH --preview-first`: previews first, then places automatically if the preview succeeds.
 
-Agents should prefer limit-style pricing whenever practical: pass `--price` so single-leg orders use `LIMIT` and multi-leg orders use `NET_DEBIT` or `NET_CREDIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
+Recommended LLM workflow: pass `--save-preview` to get a digest, then `order place-from-preview --account HASH --digest DIGEST`. This submits the exact saved preview payload after the SHA-256 digest, 15-minute TTL, and account checks pass. Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
+
+Agents should prefer limit-style pricing whenever practical: pass `--price` so orders use `LIMIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
 
 ### Mutable Operation Guard
 
@@ -111,7 +113,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, cancel) che
 - Missing config file or missing key = mutable operations disabled (safe default)
 - Guard function: `config::require_mutable_enabled()` returns `AppError::MutableDisabled` (exit code 10, error code `config.mutable_disabled`)
 - Guard is called inside the order/equity dispatch handlers, before any API call
-- Read-only commands (build, preview, get) are NOT gated
+- Read-only commands (dry-run mode, get) are NOT gated
 
 ### Post-Action Verification
 
@@ -128,7 +130,7 @@ The verification module (`src/verify.rs`) provides:
 `order get`, `order replace`, and `order cancel` manage existing orders.
 
 - **get**: Discovery mode without `--order` queries orders through `raw::fetch_order_list()` so unexpected order activity values do not abort decoding. With no arguments, it returns active orders across all linked accounts. With `--account`, it returns active orders for that account only. Active means the returned `status` is in `ACTIVE_ORDER_STATUSES`; any other returned status is treated as inactive. `--include-inactive` keeps inactive orders instead of filtering them out. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Specific-order mode is `order get --account HASH_OR_NICKNAME --order ORDER_ID`, resolves the account, and fetches the one order by ID. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
-- **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
+- **replace**: Replace an existing order by positive order ID. Requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new order payload. Includes post-replace verification via GET.
 - **cancel**: Cancel by order ID, requires `--account`. The order ID can be passed positionally or with `--order-id`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 
 ### Option Data Subcommands (4 total)
@@ -202,7 +204,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 
 ### Code Style
 
-- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, equity, market, account; inline tests for lib, cli, output, builder, preview, order/mod, verify, lifecycle, raw
+- Every module uses `#[cfg(test)] mod tests;` - separate test files for auth, error, market, account; inline tests for lib, cli, output, preview, order/mod, order/equity, order/option, order/replace, order/workflow, verify, lifecycle, raw
 - Docstrings on all public items and many private items
 - `#[must_use]` on pure functions
 - `serde_with::skip_serializing_none` for clean JSON output
@@ -214,8 +216,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 - New commands go in their command group module and get wired through `cli.rs` and `lib.rs`
 - All command output is raw JSON data payloads; errors use `ErrorBody` struct
 - Errors use `AppError` variants with stable error codes, exit codes, categories, and hints
-- Order strategies hardcode contract type + direction (safety invariant)
-- Stock actions hardcode instruction (safety invariant)
+- Equity and option order actions hardcode instruction (safety invariant)
 - Mutable order actions (place, replace, cancel) use `verify::verify_order()` for post-action verification
 
 ### Testing
