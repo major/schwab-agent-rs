@@ -40,16 +40,15 @@ cargo build --release --no-default-features
 
 ## Configuration
 
-Set environment variables for authentication:
+Set environment variables for authentication, or add the same values to `~/.config/schwab-agent/config.json`:
 
 ```bash
 export SCHWAB_CLIENT_ID="your-client-id"
 export SCHWAB_CLIENT_SECRET="your-client-secret"
+export SCHWAB_CALLBACK_URL="https://127.0.0.1:8182"
 # Token path defaults to $XDG_CONFIG_DIR/schwab-agent-rs/token.json
 # Override with SCHWAB_TOKEN_PATH if needed
 ```
-
-Global CLI flags (`--token`, `--client-id`, `--client-secret`, `--callback-url`) are also available.
 
 ### Mutable Operation Guard
 

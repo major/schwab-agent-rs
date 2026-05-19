@@ -969,14 +969,14 @@ fn do_build(strategy: &StrategyCommand) -> Result<Value, AppError> {
 
 /// Previews the order via the Schwab API.
 async fn do_preview(
-    cli: &Cli,
+    _cli: &Cli,
     account: &str,
     strategy: &StrategyCommand,
     save: bool,
     command_name: &str,
 ) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -1001,13 +1001,13 @@ async fn do_preview(
 
 /// Places the order directly via the Schwab API with post-place verification.
 async fn do_place(
-    cli: &Cli,
+    _cli: &Cli,
     account: &str,
     strategy: &StrategyCommand,
     _command_name: &str,
 ) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -1030,8 +1030,8 @@ async fn do_place(
 
 /// Places an order from a previously saved preview digest with post-place
 /// verification.
-async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
-    let provider = auth::provider(cli)?;
+async fn do_place_from_preview(_cli: &Cli, account: &str, digest: &str) -> Result<Value, AppError> {
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
@@ -1057,13 +1057,13 @@ async fn do_place_from_preview(cli: &Cli, account: &str, digest: &str) -> Result
 
 /// Replaces an existing order with a strategy payload and verifies the result.
 async fn do_replace(
-    cli: &Cli,
+    _cli: &Cli,
     account: &str,
     order_id: i64,
     strategy: &StrategyCommand,
 ) -> Result<Value, AppError> {
     let order = build_order(strategy)?;
-    let provider = auth::provider(cli)?;
+    let provider = auth::provider()?;
     let client = provider.client().await?;
     let token = provider.token().await?;
     let resolved = account::resolve_account(&token, account).await?;
