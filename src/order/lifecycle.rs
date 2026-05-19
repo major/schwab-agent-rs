@@ -319,8 +319,7 @@ mod tests {
     use time::{Duration, OffsetDateTime};
 
     use super::{ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range};
-    use crate::cli::{Cli, Command};
-    use crate::order::OrderCommand;
+    use crate::cli::{Cli, Command, OrderCommand};
 
     #[test]
     fn parse_order_get_no_args_means_all_active_orders() {

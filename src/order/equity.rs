@@ -4,7 +4,10 @@
 //! buy-to-cover). Order type is inferred from the presence of `price` and
 //! `stop` arguments rather than an explicit enum.
 
+use crate::auth;
+use crate::cli::EquityOrderArgs;
 use crate::error::AppError;
+use crate::order::workflow;
 use crate::shared::{DurationChoice, SessionChoice, to_number};
 
 // ---------------------------------------------------------------------------
@@ -120,35 +123,40 @@ pub fn build_equity_order(
 }
 
 // ---------------------------------------------------------------------------
-// Execute (placeholder for T6 wiring)
+// Execute
 // ---------------------------------------------------------------------------
 
 /// Executes an equity order workflow.
 ///
-/// Currently builds the order and returns its JSON representation.
-/// T6 will wire this to `workflow::execute_order` for preview/place flows.
+/// Builds the order, determines the workflow mode from shared order flags, and
+/// dispatches dry-run, preview, saved preview, or placement handling.
 ///
 /// # Errors
 ///
-/// Returns [`AppError::OrderValidation`] on build or serialization failure.
-#[allow(clippy::too_many_arguments)]
 pub async fn execute_equity(
-    _client: &schwab::Client,
     action: EquityActionKind,
-    symbol: &str,
-    qty: f64,
-    price: Option<f64>,
-    stop: Option<f64>,
-    session: SessionChoice,
-    duration: DurationChoice,
-    _account: Option<String>,
-    _save_preview: bool,
-    _preview_first: bool,
+    args: EquityOrderArgs,
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: T6 will wire this to workflow::execute_order
-    let order = build_equity_order(&action, symbol, qty, price, stop, session, duration)?;
-    serde_json::to_value(&order)
-        .map_err(|e| AppError::OrderValidation(format!("serialize: {e}")))
+    let order = build_equity_order(
+        &action,
+        &args.symbol,
+        args.quantity,
+        args.price,
+        args.stop,
+        args.common.session,
+        args.common.duration,
+    )?;
+    let mode = workflow::determine_mode(
+        args.common.account,
+        args.common.save_preview,
+        args.common.preview_first,
+    )?;
+    if let workflow::OrderMode::DryRun = &mode {
+        return Ok(serde_json::to_value(&order)?);
+    }
+
+    let client = auth::provider()?.client().await?;
+    workflow::execute_order(&client, &order, mode, "order equity").await
 }
 
 // ---------------------------------------------------------------------------
@@ -202,24 +210,21 @@ mod tests {
 
     #[test]
     fn sell_stop_limit_sets_both_prices() {
-        let json = build_json(&EquityActionKind::Sell, "GOOG", 3.0, Some(100.0), Some(95.0));
+        let json = build_json(
+            &EquityActionKind::Sell,
+            "GOOG",
+            3.0,
+            Some(100.0),
+            Some(95.0),
+        );
         assert_eq!(json["orderType"], "STOP_LIMIT");
         assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL");
     }
 
     #[test]
     fn sell_short_uses_sell_short_instruction() {
-        let json = build_json(
-            &EquityActionKind::SellShort,
-            "AAPL",
-            5.0,
-            Some(200.0),
-            None,
-        );
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "SELL_SHORT"
-        );
+        let json = build_json(&EquityActionKind::SellShort, "AAPL", 5.0, Some(200.0), None);
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_SHORT");
         assert_eq!(json["orderType"], "LIMIT");
     }
 
@@ -232,10 +237,7 @@ mod tests {
             None,
             Some(180.0),
         );
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "BUY_TO_COVER"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_COVER");
         assert_eq!(json["orderType"], "STOP");
     }
 

@@ -8,7 +8,10 @@
 //! - `None` : market order
 //! - `Some` : limit order
 
+use crate::auth;
+use crate::cli::OptionOrderArgs;
 use crate::error::AppError;
+use crate::order::workflow;
 use crate::shared::{DurationChoice, SessionChoice, to_number};
 
 // ---------------------------------------------------------------------------
@@ -101,34 +104,39 @@ pub fn build_option_order(
 }
 
 // ---------------------------------------------------------------------------
-// Execute (placeholder for T6 wiring)
+// Execute
 // ---------------------------------------------------------------------------
 
 /// Executes an option order workflow.
 ///
-/// Currently builds the order and returns its JSON representation.
-/// T6 will wire this to `workflow::execute_order` for preview/place flows.
+/// Builds the order, determines the workflow mode from shared order flags, and
+/// dispatches dry-run, preview, saved preview, or placement handling.
 ///
 /// # Errors
 ///
-/// Returns [`AppError::OrderValidation`] on build or serialization failure.
-#[allow(clippy::too_many_arguments)]
 pub async fn execute_option(
-    _client: &schwab::Client,
     action: OptionActionKind,
-    occ_symbol: &str,
-    qty: f64,
-    price: Option<f64>,
-    session: SessionChoice,
-    duration: DurationChoice,
-    _account: Option<String>,
-    _save_preview: bool,
-    _preview_first: bool,
+    args: OptionOrderArgs,
 ) -> Result<serde_json::Value, AppError> {
-    // TODO: T6 will wire this to workflow::execute_order
-    let order = build_option_order(&action, occ_symbol, qty, price, session, duration)?;
-    serde_json::to_value(&order)
-        .map_err(|e| AppError::OrderValidation(format!("serialize: {e}")))
+    let order = build_option_order(
+        &action,
+        &args.symbol,
+        args.quantity,
+        args.price,
+        args.common.session,
+        args.common.duration,
+    )?;
+    let mode = workflow::determine_mode(
+        args.common.account,
+        args.common.save_preview,
+        args.common.preview_first,
+    )?;
+    if let workflow::OrderMode::DryRun = &mode {
+        return Ok(serde_json::to_value(&order)?);
+    }
+
+    let client = auth::provider()?.client().await?;
+    workflow::execute_order(&client, &order, mode, "order option").await
 }
 
 // ---------------------------------------------------------------------------
@@ -168,10 +176,7 @@ mod tests {
             None,
         );
         assert_eq!(json["orderType"], "MARKET");
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "BUY_TO_OPEN"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_OPEN");
     }
 
     #[test]
@@ -183,10 +188,7 @@ mod tests {
             Some(5.50),
         );
         assert_eq!(json["orderType"], "LIMIT");
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "BUY_TO_OPEN"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_OPEN");
         assert!(json["price"].as_f64().is_some() || json["price"].as_str().is_some());
     }
 
@@ -198,10 +200,7 @@ mod tests {
             3.0,
             Some(2.00),
         );
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "SELL_TO_OPEN"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_TO_OPEN");
         assert_eq!(json["orderType"], "LIMIT");
     }
 
@@ -228,21 +227,13 @@ mod tests {
             5.0,
             Some(1.25),
         );
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "BUY_TO_CLOSE"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_CLOSE");
         assert_eq!(json["orderType"], "LIMIT");
     }
 
     #[test]
     fn occ_symbol_passed_verbatim() {
-        let json = build_json(
-            &OptionActionKind::BuyToOpen,
-            "WEIRD_OCC_SYMBOL",
-            1.0,
-            None,
-        );
+        let json = build_json(&OptionActionKind::BuyToOpen, "WEIRD_OCC_SYMBOL", 1.0, None);
         assert_eq!(
             json["orderLegCollection"][0]["instrument"]["symbol"],
             "WEIRD_OCC_SYMBOL"
@@ -260,7 +251,12 @@ mod tests {
             DurationChoice::Day,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("quantity must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("quantity must be positive")
+        );
     }
 
     #[test]
@@ -274,7 +270,12 @@ mod tests {
             DurationChoice::Day,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("quantity must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("quantity must be positive")
+        );
     }
 
     #[test]
@@ -288,7 +289,12 @@ mod tests {
             DurationChoice::Day,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("price must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("price must be positive")
+        );
     }
 
     #[test]
@@ -302,7 +308,12 @@ mod tests {
             DurationChoice::Day,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("price must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("price must be positive")
+        );
     }
 
     #[test]
@@ -323,26 +334,27 @@ mod tests {
 
     #[tokio::test]
     async fn execute_option_returns_json() {
-        let client = schwab::Client::new();
+        use crate::cli::{CommonOrderArgs, OptionOrderArgs};
+
         let result = execute_option(
-            &client,
             OptionActionKind::BuyToOpen,
-            "AAPL  250117C00150000",
-            1.0,
-            Some(5.50),
-            SessionChoice::Normal,
-            DurationChoice::Day,
-            None,
-            false,
-            false,
+            OptionOrderArgs {
+                symbol: "AAPL  250117C00150000".to_string(),
+                quantity: 1.0,
+                price: Some(5.50),
+                common: CommonOrderArgs {
+                    account: None,
+                    session: SessionChoice::Normal,
+                    duration: DurationChoice::Day,
+                    save_preview: false,
+                    preview_first: false,
+                },
+            },
         )
         .await;
         assert!(result.is_ok());
         let json = result.unwrap();
         assert_eq!(json["orderType"], "LIMIT");
-        assert_eq!(
-            json["orderLegCollection"][0]["instruction"],
-            "BUY_TO_OPEN"
-        );
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_OPEN");
     }
 }

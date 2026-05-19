@@ -1117,8 +1117,7 @@ mod tests {
     fn parse_order_equity_buy_dry_run() {
         let cli = Cli::parse_from(["schwab-agent", "order", "equity", "buy", "AAPL", "-q", "10"]);
 
-        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command
-        else {
+        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command else {
             panic!("expected order equity buy command");
         };
         assert_eq!(args.symbol, "AAPL");
@@ -1145,8 +1144,7 @@ mod tests {
             "HASH123",
         ]);
 
-        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command
-        else {
+        let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command else {
             panic!("expected order equity buy command");
         };
         assert_eq!(args.symbol, "AAPL");
