@@ -624,13 +624,11 @@ pub enum OrderCommand {
     /// verifies the resulting order with a follow-up GET.
     Replace(OrderReplaceArgs),
 
-    /// List orders for an account or all linked accounts.
+    /// Get active/all orders or one exact order.
     ///
-    /// Returns orders within a time range (default: last 60 days).
-    /// Use --recent for the last 24 hours. Optionally filter by status.
-    List(lifecycle::OrderListArgs),
-
-    /// Retrieve a single order by ID.
+    #[command(
+        after_help = "LLM selection guide:\n  schwab-agent order get\n      Get all active/open orders across every linked account. Use this first when you need current open orders and do not already know the account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME\n      Get all active/open orders for one account. Use this when you already know which account to inspect.\n\n  schwab-agent order get --include-inactive\n      Get active plus inactive orders across every linked account. Any returned status not listed in the active_statuses output field is treated as inactive. Add --account to limit this to one account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME --order ORDER_ID\n      Get one exact order. Use this only when both the account and order ID are known. Do not combine --order with discovery filters such as --recent, --from, --to, or --include-inactive.\n\nActive statuses are exact strings returned in the active_statuses output field."
+    )]
     Get(lifecycle::OrderGetArgs),
 
     /// Cancel an order by ID.
@@ -724,7 +722,6 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<Value, A
             crate::config::require_mutable_enabled()?;
             do_replace(cli, &args.account, args.order_id, &args.strategy).await
         }
-        OrderCommand::List(args) => lifecycle::handle_list(cli, args).await,
         OrderCommand::Get(args) => lifecycle::handle_get(cli, args).await,
         OrderCommand::Cancel(args) => lifecycle::handle_cancel(cli, args).await,
     }

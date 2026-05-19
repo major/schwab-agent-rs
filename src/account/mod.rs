@@ -585,25 +585,6 @@ fn find_hash_value(account_number: Option<&str>, hashes: &[AccountNumberHash]) -
         .and_then(|h| h.hash_value.clone())
 }
 
-/// Resolves the hash for the default account.
-///
-/// Returns the hash of the account marked as primary (`primary_account == true`),
-/// falling back to the first account when no primary is designated.
-///
-/// # Errors
-///
-/// Returns an `AppError` when no accounts are found or when any Schwab API call fails.
-pub(crate) async fn resolve_default_account_hash(bearer_token: &str) -> Result<String, AppError> {
-    let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
-    let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
-    let prefs = preferences
-        .into_iter()
-        .filter_map(|p| p.accounts)
-        .flatten()
-        .collect::<Vec<_>>();
-    resolve_default_account_hash_from_data(&hashes, &prefs)
-}
-
 /// Resolves the default account hash from pre-fetched data.
 ///
 /// Pure helper: prefers the account marked as `primary_account == true`,
@@ -612,6 +593,7 @@ pub(crate) async fn resolve_default_account_hash(bearer_token: &str) -> Result<S
 /// # Errors
 ///
 /// Returns `AppError::AccountValidation` when no accounts are available.
+#[cfg(test)]
 pub(crate) fn resolve_default_account_hash_from_data(
     hashes: &[AccountNumberHash],
     prefs: &[UserPreferenceAccount],

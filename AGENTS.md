@@ -111,7 +111,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, cancel) che
 - Missing config file or missing key = mutable operations disabled (safe default)
 - Guard function: `config::require_mutable_enabled()` returns `AppError::MutableDisabled` (exit code 10, error code `config.mutable_disabled`)
 - Guard is called inside the order/equity dispatch handlers, before any API call
-- Read-only commands (build, preview, list, get) are NOT gated
+- Read-only commands (build, preview, get) are NOT gated
 
 ### Post-Action Verification
 
@@ -125,10 +125,9 @@ The verification module (`src/verify.rs`) provides:
 
 ### Order Lifecycle Commands
 
-`order list`, `order get`, `order replace`, and `order cancel` manage existing orders.
+`order get`, `order replace`, and `order cancel` manage existing orders.
 
-- **list**: Per-account order listing with status filtering, date range, and `--recent` (24h lookback). `--account` accepts a raw hash or a nickname (same resolution as `account`); when omitted, the primary account is used (falls back to first account). Use `--all-accounts` to opt into querying every linked account; it conflicts with `--account`. Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Uses `raw::fetch_order_list()` instead of typed `schwab::Client::get_orders()` so unexpected order activity values do not abort decoding. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
-- **get**: Single order by ID (positional arg), requires `--account`.
+- **get**: Discovery mode without `--order` queries orders through `raw::fetch_order_list()` so unexpected order activity values do not abort decoding. With no arguments, it returns active orders across all linked accounts. With `--account`, it returns active orders for that account only. Active means the returned `status` is in `ACTIVE_ORDER_STATUSES`; any other returned status is treated as inactive. `--include-inactive` keeps inactive orders instead of filtering them out. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Specific-order mode is `order get --account HASH_OR_NICKNAME --order ORDER_ID`, resolves the account, and fetches the one order by ID. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
 - **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
 - **cancel**: Cancel by order ID, requires `--account`. The order ID can be passed positionally or with `--order-id`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 

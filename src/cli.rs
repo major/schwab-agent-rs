@@ -529,6 +529,20 @@ mod tests {
     }
 
     #[test]
+    fn order_get_help_renders_llm_guide_once() {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut("order")
+            .and_then(|order| order.find_subcommand_mut("get"))
+            .map(|get| get.render_long_help().to_string())
+            .expect("order get command exists");
+
+        assert_eq!(help.matches("LLM selection guide:").count(), 1);
+        assert!(help.contains("active_statuses output field"));
+        assert!(help.contains("discovery filters"));
+    }
+
+    #[test]
     fn command_name_auth_status() {
         let cli = Cli::parse_from(["schwab-agent", "auth", "status"]);
         assert_eq!(cli.command_name(), "auth.status");
