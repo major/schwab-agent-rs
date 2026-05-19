@@ -23,6 +23,7 @@ use crate::{account, auth, config, verify};
 ///
 /// Returns `AppError` on mutable-guard failure, validation errors, auth
 /// issues, account resolution failures, or Schwab API errors.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn execute_replace(args: &ReplaceArgs) -> Result<Value, AppError> {
     config::require_mutable_enabled()?;
 

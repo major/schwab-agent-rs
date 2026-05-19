@@ -72,6 +72,7 @@ pub(crate) struct OrderListQuery<'a> {
 /// Returns an error when the HTTP request fails, the server returns a
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<Account>`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn fetch_accounts(
     bearer_token: &str,
     fields: Option<&str>,
@@ -110,6 +111,7 @@ pub async fn fetch_accounts(
 /// Returns an error when the HTTP request fails, the server returns a
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<AccountNumberHash>`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn fetch_account_numbers(bearer_token: &str) -> Result<Vec<AccountNumberHash>, AppError> {
     let value = fetch_json(ACCOUNT_NUMBERS_URL, bearer_token).await?;
     let array = account_numbers_array(value)?;
@@ -128,6 +130,7 @@ pub async fn fetch_account_numbers(bearer_token: &str) -> Result<Vec<AccountNumb
 /// Returns an error when the HTTP request fails, the server returns a
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<UserPreference>`.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn fetch_user_preference(bearer_token: &str) -> Result<Vec<UserPreference>, AppError> {
     let value = fetch_json(USER_PREFERENCE_URL, bearer_token).await?;
     let array = normalize_user_preference_response(value);
@@ -146,6 +149,7 @@ pub async fn fetch_user_preference(bearer_token: &str) -> Result<Vec<UserPrefere
 ///
 /// Returns an error when the HTTP request fails, Schwab returns a non-success
 /// status, or the body is not valid JSON.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn fetch_order_list(
     bearer_token: &str,
     account_hash: Option<&str>,
@@ -160,6 +164,7 @@ pub(crate) async fn fetch_order_list(
 }
 
 /// Fetches a Schwab API URL as raw JSON using bearer authentication.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn fetch_json(url: &str, bearer_token: &str) -> Result<Value, AppError> {
     let response = reqwest::Client::new()
         .get(url)
@@ -180,6 +185,7 @@ async fn fetch_json(url: &str, bearer_token: &str) -> Result<Value, AppError> {
 }
 
 /// Fetches a Schwab order list URL as raw JSON with query parameters.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn fetch_json_query(
     url: &str,
     bearer_token: &str,

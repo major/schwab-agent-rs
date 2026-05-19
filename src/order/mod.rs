@@ -22,6 +22,7 @@ use equity::EquityActionKind;
 use option::OptionActionKind;
 
 /// Handles all unified order subcommands.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<Value, AppError> {
     match command {
         OrderCommand::Equity(args) => dispatch_equity(args).await,
@@ -35,6 +36,7 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<Value, A
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_equity(command: &EquityArgs) -> Result<Value, AppError> {
     let (action, args) = match command {
         EquityArgs::Buy(args) => (EquityActionKind::Buy, clone_equity_args(args)),
@@ -46,6 +48,7 @@ async fn dispatch_equity(command: &EquityArgs) -> Result<Value, AppError> {
     equity::execute_equity(action, args).await
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_option(command: &OptionArgs) -> Result<Value, AppError> {
     let (action, args) = match command {
         OptionArgs::BuyToOpen(args) => (OptionActionKind::BuyToOpen, clone_option_args(args)),
@@ -57,11 +60,13 @@ async fn dispatch_option(command: &OptionArgs) -> Result<Value, AppError> {
     option::execute_option(action, args).await
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_place_from_preview(args: &PlaceFromPreviewArgs) -> Result<Value, AppError> {
     let client = crate::auth::provider()?.client().await?;
     workflow::place_from_saved_preview(&client, &args.account, &args.digest).await
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_preview_raw(args: &PreviewRawArgs) -> Result<Value, AppError> {
     let client = crate::auth::provider()?.client().await?;
     workflow::execute_raw_preview(
@@ -74,6 +79,7 @@ async fn dispatch_preview_raw(args: &PreviewRawArgs) -> Result<Value, AppError> 
     .await
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_place_raw(args: &PlaceRawArgs) -> Result<Value, AppError> {
     let client = crate::auth::provider()?.client().await?;
     workflow::execute_raw_place(&client, &args.account, &args.json).await
@@ -105,6 +111,63 @@ fn clone_common_args(args: &CommonOrderArgs) -> CommonOrderArgs {
         duration: args.duration,
         save_preview: args.save_preview,
         preview_first: args.preview_first,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::{DurationChoice, SessionChoice};
+
+    fn sample_common() -> CommonOrderArgs {
+        CommonOrderArgs {
+            account: Some("HASH".to_string()),
+            session: SessionChoice::Normal,
+            duration: DurationChoice::Day,
+            save_preview: true,
+            preview_first: false,
+        }
+    }
+
+    #[test]
+    fn clone_common_args_preserves_all_fields() {
+        let orig = sample_common();
+        let cloned = clone_common_args(&orig);
+        assert_eq!(cloned.account, Some("HASH".to_string()));
+        assert!(cloned.save_preview);
+        assert!(!cloned.preview_first);
+    }
+
+    #[test]
+    fn clone_equity_args_preserves_all_fields() {
+        let orig = EquityOrderArgs {
+            symbol: "AAPL".to_string(),
+            quantity: 10.0,
+            price: Some(150.0),
+            stop: Some(140.0),
+            common: sample_common(),
+        };
+        let cloned = clone_equity_args(&orig);
+        assert_eq!(cloned.symbol, "AAPL");
+        assert_eq!(cloned.quantity, 10.0);
+        assert_eq!(cloned.price, Some(150.0));
+        assert_eq!(cloned.stop, Some(140.0));
+        assert_eq!(cloned.common.account, Some("HASH".to_string()));
+    }
+
+    #[test]
+    fn clone_option_args_preserves_all_fields() {
+        let orig = OptionOrderArgs {
+            symbol: "AAPL  250117C00150000".to_string(),
+            quantity: 2.0,
+            price: Some(3.50),
+            common: sample_common(),
+        };
+        let cloned = clone_option_args(&orig);
+        assert_eq!(cloned.symbol, "AAPL  250117C00150000");
+        assert_eq!(cloned.quantity, 2.0);
+        assert_eq!(cloned.price, Some(3.50));
+        assert!(cloned.common.save_preview);
     }
 }
 

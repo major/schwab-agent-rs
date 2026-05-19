@@ -14,6 +14,7 @@ use super::types::{
 };
 
 /// Fetches an option chain and returns filtered `option screen` rows.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn handle(client: &Client, args: &ScreenArgs) -> Result<Value, AppError> {
     let options = build_chain_options(args);
     let chain = client.get_option_chain(options).await?;
@@ -366,13 +367,13 @@ fn format_number(value: f64) -> String {
     formatted
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct SortSpec<'a> {
     field: &'a str,
     direction: SortDirection,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum SortDirection {
     Asc,
     Desc,
@@ -412,5 +413,231 @@ impl SortKey<'_> {
             Self::Bool(_) => 2,
             Self::Null => 3,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    fn default_screen_args(symbol: &str) -> ScreenArgs {
+        ScreenArgs {
+            symbol: symbol.to_string(),
+            contract_type: None,
+            expiration: None,
+            strike_range: None,
+            strike_count: None,
+            dte_min: None,
+            dte_max: None,
+            strike_min: None,
+            strike_max: None,
+            strike: None,
+            delta_min: None,
+            delta_max: None,
+            min_bid: None,
+            max_ask: None,
+            min_volume: None,
+            min_oi: None,
+            max_spread_pct: None,
+            min_premium: None,
+            max_premium: None,
+            limit: None,
+            sort: None,
+            fields: None,
+        }
+    }
+
+    #[test]
+    fn build_chain_options_basic() {
+        let args = default_screen_args("AAPL");
+        let _opts = build_chain_options(&args);
+    }
+
+    #[test]
+    fn build_chain_options_with_type_and_range() {
+        let mut args = default_screen_args("SPY");
+        args.contract_type = Some("CALL".to_string());
+        args.strike_range = Some("ITM".to_string());
+        let _opts = build_chain_options(&args);
+    }
+
+    #[test]
+    fn parse_sort_spec_default_direction() {
+        let spec = parse_sort_spec("strike").unwrap();
+        assert_eq!(spec.field, "strike");
+        assert!(matches!(spec.direction, SortDirection::Asc));
+    }
+
+    #[test]
+    fn parse_sort_spec_explicit_desc() {
+        let spec = parse_sort_spec("bid:desc").unwrap();
+        assert_eq!(spec.field, "bid");
+        assert!(matches!(spec.direction, SortDirection::Desc));
+    }
+
+    #[test]
+    fn parse_sort_spec_explicit_asc() {
+        let spec = parse_sort_spec("volume:asc").unwrap();
+        assert_eq!(spec.field, "volume");
+        assert!(matches!(spec.direction, SortDirection::Asc));
+    }
+
+    #[test]
+    fn parse_sort_spec_unknown_field_rejected() {
+        let err = parse_sort_spec("bogus").unwrap_err();
+        assert!(err.to_string().contains("unknown sort field"));
+    }
+
+    #[test]
+    fn parse_sort_spec_invalid_direction_rejected() {
+        let err = parse_sort_spec("strike:sideways").unwrap_err();
+        assert!(err.to_string().contains("sort direction must be"));
+    }
+
+    #[test]
+    fn default_sort_direction_desc_for_price_fields() {
+        assert!(matches!(default_sort_direction("bid"), SortDirection::Desc));
+        assert!(matches!(default_sort_direction("ask"), SortDirection::Desc));
+        assert!(matches!(
+            default_sort_direction("volume"),
+            SortDirection::Desc
+        ));
+        assert!(matches!(
+            default_sort_direction("theta"),
+            SortDirection::Desc
+        ));
+    }
+
+    #[test]
+    fn default_sort_direction_asc_for_other_fields() {
+        assert!(matches!(
+            default_sort_direction("strike"),
+            SortDirection::Asc
+        ));
+        assert!(matches!(
+            default_sort_direction("expiration"),
+            SortDirection::Asc
+        ));
+        assert!(matches!(default_sort_direction("dte"), SortDirection::Asc));
+    }
+
+    #[test]
+    fn sort_direction_as_str() {
+        assert_eq!(SortDirection::Asc.as_str(), "asc");
+        assert_eq!(SortDirection::Desc.as_str(), "desc");
+    }
+
+    #[test]
+    fn compare_values_numbers() {
+        let a = Value::from(1.0);
+        let b = Value::from(2.0);
+        assert_eq!(compare_values(&a, &b), Ordering::Less);
+        assert_eq!(compare_values(&b, &a), Ordering::Greater);
+        assert_eq!(compare_values(&a, &a), Ordering::Equal);
+    }
+
+    #[test]
+    fn compare_values_strings() {
+        let a = Value::String("alpha".to_string());
+        let b = Value::String("beta".to_string());
+        assert_eq!(compare_values(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn compare_values_null_sorts_last() {
+        let a = Value::from(1.0);
+        let b = Value::Null;
+        assert_eq!(compare_values(&a, &b), Ordering::Less);
+        assert_eq!(compare_values(&b, &a), Ordering::Greater);
+        assert_eq!(compare_values(&b, &b), Ordering::Equal);
+    }
+
+    #[test]
+    fn compare_values_bools() {
+        let a = Value::Bool(false);
+        let b = Value::Bool(true);
+        assert_eq!(compare_values(&a, &b), Ordering::Less);
+    }
+
+    #[test]
+    fn compare_values_mixed_types_use_rank() {
+        let num = Value::from(1.0);
+        let s = Value::String("abc".to_string());
+        assert_eq!(compare_values(&num, &s), Ordering::Less);
+    }
+
+    #[test]
+    fn sort_key_numeric_string_treated_as_number() {
+        let v = Value::String("42.5".to_string());
+        assert!(matches!(sort_key(&v), SortKey::Number(n) if (n - 42.5).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn sort_key_non_numeric_string_treated_as_string() {
+        let v = Value::String("hello".to_string());
+        assert!(matches!(sort_key(&v), SortKey::String("hello")));
+    }
+
+    #[test]
+    fn sort_key_rank_ordering() {
+        assert!(SortKey::Number(1.0).rank() < SortKey::String("a").rank());
+        assert!(SortKey::String("a").rank() < SortKey::Bool(true).rank());
+        assert!(SortKey::Bool(true).rank() < SortKey::Null.rank());
+    }
+
+    #[test]
+    fn normalized_contract_type_normalizes() {
+        assert_eq!(
+            normalized_contract_type(Some("call")),
+            Some("CALL".to_string())
+        );
+        assert_eq!(normalized_contract_type(None), None);
+        assert_eq!(normalized_contract_type(Some("")), None);
+        assert_eq!(normalized_contract_type(Some("  ")), None);
+    }
+
+    #[test]
+    fn format_number_formats_as_string() {
+        assert_eq!(format_number(42.5), "42.5");
+        assert_eq!(format_number(100.0), "100");
+    }
+
+    #[test]
+    fn number_arg_valid() {
+        let n = number_arg(10.5).unwrap();
+        assert_eq!(n.to_string(), "10.5");
+    }
+
+    #[test]
+    fn number_value_converts_to_json() {
+        let n = crate::shared::to_number(42.0).unwrap();
+        let v = number_value(n);
+        assert!(!v.is_null());
+    }
+
+    #[test]
+    fn option_value_returns_value_or_null() {
+        assert_eq!(option_value(&Some(json!(42))), json!(42));
+        assert_eq!(option_value(&None), Value::Null);
+    }
+
+    #[test]
+    fn selected_fields_defaults() {
+        let args = default_screen_args("AAPL");
+        let fields = selected_fields(&args).unwrap();
+        assert!(!fields.is_empty());
+    }
+
+    #[test]
+    fn parse_fields_splits_and_trims() {
+        let fields = parse_fields("sym, strike , bid");
+        assert_eq!(fields, vec!["sym", "strike", "bid"]);
+    }
+
+    #[test]
+    fn parse_fields_skips_empty() {
+        let fields = parse_fields("sym,,bid");
+        assert_eq!(fields, vec!["sym", "bid"]);
     }
 }

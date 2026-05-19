@@ -62,6 +62,7 @@ pub(crate) struct OrderActionResult {
 /// or with [`VerificationState::Unverified`] and failure reasons when it
 /// doesn't. The action is still considered successful either way; verification
 /// is purely informational for the agent.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) async fn verify_order(
     client: &schwab::Client,
     account: &str,

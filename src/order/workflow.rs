@@ -63,6 +63,7 @@ pub fn determine_mode(
 ///
 /// Uses the auth provider's bearer token for account discovery, then matches
 /// the selector against known account hashes and nicknames.
+#[cfg_attr(coverage_nightly, coverage(off))]
 async fn resolve_account_hash(account: &str) -> Result<String, AppError> {
     let provider = crate::auth::provider()?;
     let token = provider.token().await?;
@@ -80,6 +81,7 @@ async fn resolve_account_hash(account: &str) -> Result<String, AppError> {
 ///
 /// Returns `AppError` on validation failures, auth issues, Schwab API errors,
 /// or when mutable operations are disabled.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn execute_order(
     client: &schwab::Client,
     order: &schwab::OrderBuilder,
@@ -153,6 +155,7 @@ pub async fn execute_order(
 ///
 /// Returns `AppError` on mutable-guard failure, expired/invalid preview,
 /// account mismatch, or Schwab API errors.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn place_from_saved_preview(
     client: &schwab::Client,
     account: &str,
@@ -186,6 +189,7 @@ pub async fn place_from_saved_preview(
 /// # Errors
 ///
 /// Returns `AppError` on invalid JSON, auth failures, or Schwab API errors.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn execute_raw_preview(
     client: &schwab::Client,
     account: &str,
@@ -220,6 +224,7 @@ pub async fn execute_raw_preview(
 ///
 /// Returns `AppError` on mutable-guard failure, invalid JSON, auth failures,
 /// or Schwab API errors.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn execute_raw_place(
     client: &schwab::Client,
     account: &str,

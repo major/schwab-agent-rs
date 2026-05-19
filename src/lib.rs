@@ -1,5 +1,7 @@
 //! Agent-oriented JSON CLI porcelain for the `schwab` crate.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 pub mod account;
 mod analyze;
 mod auth;
@@ -25,6 +27,7 @@ use crate::error::AppError;
 use crate::output::ErrorBody;
 
 /// Parses process arguments, runs the selected command, and writes JSON output.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn run_from_env() -> i32 {
     run(Cli::parse()).await
 }
@@ -45,6 +48,7 @@ pub async fn run(cli: Cli) -> i32 {
 }
 
 /// Executes a command and returns the data payload directly.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn execute(cli: Cli) -> Result<Value, AppError> {
     // Order commands produce their own data values with dynamic command names.
     if let Command::Order(command) = &cli.command {

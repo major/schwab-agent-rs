@@ -93,6 +93,7 @@ pub fn compute_expected_move(
 /// Returns [`AppError`] when Schwab chain retrieval fails, the chain lacks a
 /// usable underlying price, no matching expiration/ATM contracts exist, or the
 /// selected contracts cannot be priced.
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub async fn expected_move(client: &Client, args: &ExpectedMoveArgs) -> Result<Value, AppError> {
     let chain = client
         .get_option_chain(option_chain_options(&args.symbol))
