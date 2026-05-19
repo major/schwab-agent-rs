@@ -585,10 +585,10 @@ pub struct CommonOrderArgs {
     #[arg(long, default_value = "day")]
     pub duration: crate::shared::DurationChoice,
     /// Save order preview to disk (requires --account).
-    #[arg(long)]
+    #[arg(long, requires = "account")]
     pub save_preview: bool,
     /// Preview order first, then place automatically (requires --account).
-    #[arg(long)]
+    #[arg(long, requires = "account")]
     pub preview_first: bool,
 }
 
