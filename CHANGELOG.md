@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-05-19
+
+### <!-- 0 -->🚀 Features
+
+- *(order)* Add equity order handler using OrderBuilder
+- *(order)* Add option order handler using OrderBuilder
+- *(order)* Add shared order workflow (mode dispatch, preview, place)
+- *(order)* Add replace handler with equity/option support
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Tolerate canceled order activities
+- *(order)* Make get discover active orders
+- *(order)* Resolve check suite issues from refactor
+- *(cli)* Enforce --account requirement for preview flags at parser level
+
+### <!-- 2 -->📚 Documentation
+
+- Update AGENTS.md, README.md, and SKILL.md for unified order interface
+
+### <!-- 4 -->🔧 Refactor
+
+- *(account)* Collapse account subcommands
+- *(auth)* Remove credential CLI flags
+- *(cli)* Define unified order command types
+- *(order)* Wire unified dispatch, remove equity module and custom option builder
+
+### <!-- 6 -->🧪 Testing
+
+- *(order)* Add unit tests for equity, option, workflow, and replace handlers
+
+### <!-- 7 -->⚙️ Miscellaneous
+
+- Merge main into issue 62 branch
+- Bump schwab to 0.2.3, scaffold order modules
+- Merge main to resolve conflicts
+
+
 ## [0.3.1] - 2026-05-18
 
 ### <!-- 7 -->⚙️ Miscellaneous
