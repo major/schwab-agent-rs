@@ -7,40 +7,37 @@ use schwab::{
 };
 
 use crate::auth;
-use crate::cli::{AccountCommand, Cli};
+use crate::cli::{AccountArgs, Cli};
 use crate::error::AppError;
 
 /// Default position fields for row-based output.
 const DEFAULT_POSITION_FIELDS: [&str; 6] = ["sym", "long_qty", "avg", "mktval", "pnl", "pnlpct"];
 
-/// Dispatches an account subcommand and returns its JSON value.
-pub(crate) async fn handle(cli: &Cli, command: &AccountCommand) -> Result<Value, AppError> {
-    match command {
-        AccountCommand::Summary(args) => {
-            // Validate fields before auth to fail fast on bad input.
-            let position_fields = if args.all_fields {
-                None
-            } else {
-                Some(selected_position_fields(args.fields.as_deref())?)
-            };
-            let provider = auth::provider(cli)?;
-            let token = provider.token().await?;
-            let data = run_summary(
-                &token,
-                args.include_positions(),
-                args.with_positions_only,
-                position_fields.as_deref(),
-            )
-            .await?;
-            Ok(to_value(data)?)
-        }
-        AccountCommand::Resolve(args) => {
-            let provider = auth::provider(cli)?;
-            let token = provider.token().await?;
-            let data = resolve_account(&token, &args.selector).await?;
-            Ok(to_value(data)?)
-        }
+/// Dispatches the account command and returns its JSON value.
+pub(crate) async fn handle(cli: &Cli, args: &AccountArgs) -> Result<Value, AppError> {
+    if let Some(selector) = &args.selector {
+        let provider = auth::provider(cli)?;
+        let token = provider.token().await?;
+        let data = resolve_account(&token, selector).await?;
+        return Ok(to_value(data)?);
     }
+
+    // Validate fields before fetching account data to fail fast on bad input.
+    let position_fields = if args.all_fields {
+        None
+    } else {
+        Some(selected_position_fields(args.fields.as_deref())?)
+    };
+    let provider = auth::provider(cli)?;
+    let token = provider.token().await?;
+    let data = run_summary(
+        &token,
+        args.include_positions(),
+        args.with_positions_only,
+        position_fields.as_deref(),
+    )
+    .await?;
+    Ok(to_value(data)?)
 }
 
 /// A normalized brokerage account row for summary output.

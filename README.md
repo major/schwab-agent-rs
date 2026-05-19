@@ -95,17 +95,17 @@ schwab-agent market history SPY --all-fields
 
 ### account
 
-Account discovery, balances, positions, and resolution for LLM agents: `summary`, `resolve`.
+Account discovery, balances, positions, and resolution for LLM agents.
 
-Use `account summary` to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands.
+Use `account` without a selector to list available account hashes and nicknames, then pass the chosen value to `--account` in stock and order commands. Pass an account hash or nickname as the optional selector to resolve it to the canonical hash.
 
 ```bash
-schwab-agent account summary                                    # list all accounts with balances
-schwab-agent account summary --positions                        # include holdings (default compact columns)
-schwab-agent account summary --positions --fields sym,mktval,pnl  # select position columns
-schwab-agent account summary --positions --all-fields           # all 9 curated position fields as objects
-schwab-agent account summary --with-positions-only              # only accounts that hold positions
-schwab-agent account resolve Trading                            # resolve nickname to canonical hash
+schwab-agent account                                    # list all accounts with balances
+schwab-agent account --positions                        # include holdings (default compact columns)
+schwab-agent account --positions --fields sym,mktval,pnl  # select position columns
+schwab-agent account --positions --all-fields           # all 9 curated position fields as objects
+schwab-agent account --with-positions-only              # only accounts that hold positions
+schwab-agent account Trading                            # resolve nickname to canonical hash
 ```
 
 Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
@@ -194,7 +194,7 @@ Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 All mutable order actions (place, place-from-preview, place-raw, replace, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
 
-`order list` accepts `--account` as a raw hash or a nickname (same resolution as `account summary`). When `--account` is omitted, the primary account is used automatically; if no primary account is designated, the first account in the list is used. Use `--all-accounts` to query every linked account instead; it conflicts with `--account` so a command cannot mix single-account and cross-account modes. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break listing. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
+`order list` accepts `--account` as a raw hash or a nickname (same resolution as `account`). When `--account` is omitted, the primary account is used automatically; if no primary account is designated, the first account in the list is used. Use `--all-accounts` to query every linked account instead; it conflicts with `--account` so a command cannot mix single-account and cross-account modes. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break listing. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
 
 `order list --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`.
 

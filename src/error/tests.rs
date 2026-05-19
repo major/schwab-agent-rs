@@ -94,7 +94,7 @@ fn account_validation_classification() {
     assert!(!err.retryable());
     assert_eq!(
         err.hint(),
-        Some("Run account summary to list available account hashes and nicknames.")
+        Some("Run account to list available account hashes and nicknames.")
     );
 }
 

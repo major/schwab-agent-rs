@@ -23,7 +23,7 @@ use crate::verify;
 /// List orders for an account, defaulting to the primary account when omitted.
 ///
 /// `--account` accepts a raw account hash or a nickname (same resolution as
-/// `account summary`). When omitted, the primary account is used; if no
+/// `account`). When omitted, the primary account is used; if no
 /// primary is set, the first account is used. Use `--all-accounts` to query
 /// every linked account instead.
 ///
@@ -128,7 +128,7 @@ enum RangeBoundary {
 /// Lists orders filtered by account, status, and time range.
 ///
 /// When `--account` is provided it is resolved via nickname or hash (same as
-/// `account summary`). When omitted, the primary account is used; if no
+/// `account`). When omitted, the primary account is used; if no
 /// primary is designated, the first account in the Schwab account list is used.
 /// Use `--all-accounts` to preserve the legacy cross-account listing behavior.
 pub(crate) async fn handle_list(cli: &Cli, args: &OrderListArgs) -> Result<Value, AppError> {

@@ -643,7 +643,7 @@ pub enum OrderCommand {
 /// Arguments for `order preview <strategy>`.
 #[derive(Debug, Args)]
 pub struct OrderPreviewArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -659,7 +659,7 @@ pub struct OrderPreviewArgs {
 /// Arguments for `order place <strategy>`.
 #[derive(Debug, Args)]
 pub struct OrderPlaceArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -683,7 +683,7 @@ pub struct PlaceFromPreviewArgs {
 /// Arguments for `order replace <order-id> <strategy>`.
 #[derive(Debug, Args)]
 pub struct OrderReplaceArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 

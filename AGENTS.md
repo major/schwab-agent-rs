@@ -44,7 +44,7 @@ src/
     preview.rs     - SHA-256 tamper-evident preview with 15-min TTL (shared by equity + order)
     lifecycle.rs   - Order lifecycle commands: list, get, cancel with post-action verification
   account/
-    mod.rs         - Account commands: summary, resolve; account resolver; balance renderer
+    mod.rs         - Account command: summary when no selector is provided, resolver when selector is provided, balance renderer
     tests.rs       - Account module tests
   options/
     mod.rs         - Module root: re-exports subcommand modules
@@ -73,7 +73,7 @@ src/
 
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
-- **account** - Account discovery, balances, positions (with field selection), and resolution (summary, resolve)
+- **account** - Account discovery, balances, positions (with field selection), and resolution
 - **stock** - Equity order workflow (build, preview, place, place-from-preview, preview-raw, place-raw)
 - **order** - Option order workflow (build, preview, place, replace, place-from-preview) + lifecycle (list, get, cancel)
 - **option** - Option chain data (expirations, chain, screen, contract)
@@ -127,7 +127,7 @@ The verification module (`src/verify.rs`) provides:
 
 `order list`, `order get`, `order replace`, and `order cancel` manage existing orders.
 
-- **list**: Per-account order listing with status filtering, date range, and `--recent` (24h lookback). `--account` accepts a raw hash or a nickname (same resolution as `account summary`); when omitted, the primary account is used (falls back to first account). Use `--all-accounts` to opt into querying every linked account; it conflicts with `--account`. Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Uses `raw::fetch_order_list()` instead of typed `schwab::Client::get_orders()` so unexpected order activity values do not abort decoding. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
+- **list**: Per-account order listing with status filtering, date range, and `--recent` (24h lookback). `--account` accepts a raw hash or a nickname (same resolution as `account`); when omitted, the primary account is used (falls back to first account). Use `--all-accounts` to opt into querying every linked account; it conflicts with `--account`. Defaults to 60 days if no `--from` specified. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Uses `raw::fetch_order_list()` instead of typed `schwab::Client::get_orders()` so unexpected order activity values do not abort decoding. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
 - **get**: Single order by ID (positional arg), requires `--account`.
 - **replace**: Replace an existing option order by positive order ID, requires `--account`, then a safe strategy payload (e.g., `long-call ...`). Includes post-replace verification via GET.
 - **cancel**: Cancel by order ID, requires `--account`. The order ID can be passed positionally or with `--order-id`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
@@ -140,7 +140,7 @@ Row-based output (columns + rows arrays) for expirations, chain, and screen. Fla
 
 ### Account Position Output
 
-`account summary --positions` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
+`account --positions` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
 
 ### Market Quote and History Output
 

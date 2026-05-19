@@ -55,16 +55,16 @@ Optional history flags: `--period-type`, `--period`, `--frequency-type`, `--freq
 
 Discover and resolve accounts before placing orders.
 
-Recommended workflow: `account summary` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
+Recommended workflow: `account` -> choose `account_hash` or nickname -> pass to `--account` in stock/order commands.
 
 ```bash
-schwab-agent account summary                                    # list accounts with balances
-schwab-agent account summary --positions                        # include holdings (default compact columns)
-schwab-agent account summary --positions --fields sym,mktval,pnl  # select position columns
-schwab-agent account summary --positions --all-fields           # all 9 curated position fields as objects
-schwab-agent account summary --with-positions-only              # only accounts that hold positions
-schwab-agent account resolve Trading                            # resolve nickname to canonical hash
-schwab-agent account resolve ABCDEF1234567890                   # verify a known hash
+schwab-agent account                                    # list accounts with balances
+schwab-agent account --positions                        # include holdings (default compact columns)
+schwab-agent account --positions --fields sym,mktval,pnl  # select position columns
+schwab-agent account --positions --all-fields           # all 9 curated position fields as objects
+schwab-agent account --with-positions-only              # only accounts that hold positions
+schwab-agent account Trading                            # resolve nickname to canonical hash
+schwab-agent account ABCDEF1234567890                   # verify a known hash
 ```
 
 Position output with `--positions` is token-optimized by default, returning `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` for curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
