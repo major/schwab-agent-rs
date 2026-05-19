@@ -148,7 +148,7 @@ impl AppError {
                 Some("Check that the symbol is correct and has listed options")
             }
             Self::AccountValidation(_) => {
-                Some("Run account summary to list available account hashes and nicknames.")
+                Some("Run account to list available account hashes and nicknames.")
             }
             Self::AccountResponseShape { .. } => Some(
                 "Schwab returned an account response shape this version does not recognize. Update schwab-agent-rs or report the sanitized shape metadata.",

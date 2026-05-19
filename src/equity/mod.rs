@@ -162,7 +162,7 @@ pub enum EquityCommand {
 /// Arguments for `stock preview <action>`.
 #[derive(Debug, Args)]
 pub struct EquityPreviewArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -178,7 +178,7 @@ pub struct EquityPreviewArgs {
 /// Arguments for `stock place <action>`.
 #[derive(Debug, Args)]
 pub struct EquityPlaceArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -202,7 +202,7 @@ pub struct PlaceFromPreviewArgs {
 /// Arguments for `stock preview-raw`.
 #[derive(Debug, Args)]
 pub struct RawPreviewArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
@@ -218,7 +218,7 @@ pub struct RawPreviewArgs {
 /// Arguments for `stock place-raw`.
 #[derive(Debug, Args)]
 pub struct RawPlaceArgs {
-    /// Account hash or nickname (use `account summary` to list accounts).
+    /// Account hash or nickname (use `account` to list accounts).
     #[arg(long)]
     pub account: String,
 
