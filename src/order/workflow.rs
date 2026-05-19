@@ -299,4 +299,29 @@ mod tests {
                 .contains("--preview-first requires --account")
         );
     }
+
+    #[test]
+    fn both_flags_without_account_hits_save_preview_error() {
+        // (None, true, true) matches the (None, true, _) arm
+        let err = determine_mode(None, true, true).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--save-preview requires --account")
+        );
+    }
+
+    #[test]
+    fn order_mode_debug_includes_variant_name() {
+        let dry = determine_mode(None, false, false).unwrap();
+        assert!(format!("{dry:?}").contains("DryRun"));
+
+        let place = determine_mode(Some("H".to_string()), false, false).unwrap();
+        assert!(format!("{place:?}").contains("Place"));
+
+        let save = determine_mode(Some("H".to_string()), true, false).unwrap();
+        assert!(format!("{save:?}").contains("SavePreview"));
+
+        let pf = determine_mode(Some("H".to_string()), false, true).unwrap();
+        assert!(format!("{pf:?}").contains("PreviewFirst"));
+    }
 }

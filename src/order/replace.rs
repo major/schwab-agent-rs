@@ -209,4 +209,66 @@ mod tests {
         let err = build_replacement_order(&spec).unwrap_err();
         assert!(err.to_string().contains("price must be positive"));
     }
+
+    #[test]
+    fn builds_equity_sell_replacement() {
+        let spec = ReplaceOrderSpec::Equity(EquityArgs::Sell(EquityOrderArgs {
+            symbol: "GOOG".to_string(),
+            quantity: 15.0,
+            price: None,
+            stop: None,
+            common: test_common(),
+        }));
+
+        let order = build_replacement_order(&spec).unwrap();
+        let json = serde_json::to_value(&order).unwrap();
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL");
+    }
+
+    #[test]
+    fn builds_equity_buy_to_cover_replacement() {
+        let spec = ReplaceOrderSpec::Equity(EquityArgs::BuyToCover(EquityOrderArgs {
+            symbol: "MSFT".to_string(),
+            quantity: 7.0,
+            price: Some(300.0),
+            stop: None,
+            common: test_common(),
+        }));
+
+        let order = build_replacement_order(&spec).unwrap();
+        let json = serde_json::to_value(&order).unwrap();
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_COVER");
+    }
+
+    #[test]
+    fn builds_option_sell_to_open_replacement() {
+        let spec = ReplaceOrderSpec::Option(OptionArgs::SellToOpen(OptionOrderArgs {
+            symbol: "AAPL  250117C00150000".to_string(),
+            quantity: 3.0,
+            price: Some(4.25),
+            common: test_common(),
+        }));
+
+        let order = build_replacement_order(&spec).unwrap();
+        let json = serde_json::to_value(&order).unwrap();
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_TO_OPEN");
+    }
+
+    #[test]
+    fn builds_option_buy_to_close_replacement() {
+        let spec = ReplaceOrderSpec::Option(OptionArgs::BuyToClose(OptionOrderArgs {
+            symbol: "SPY   250620P00400000".to_string(),
+            quantity: 2.0,
+            price: None,
+            common: test_common(),
+        }));
+
+        let order = build_replacement_order(&spec).unwrap();
+        let json = serde_json::to_value(&order).unwrap();
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_CLOSE");
+    }
 }

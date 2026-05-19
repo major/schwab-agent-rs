@@ -302,4 +302,132 @@ mod tests {
         assert_eq!(json["session"], "AM");
         assert_eq!(json["duration"], "GOOD_TILL_CANCEL");
     }
+
+    #[test]
+    fn buy_stop_produces_stop_order() {
+        let json = build_json(&EquityActionKind::Buy, "SPY", 10.0, None, Some(400.0));
+        assert_eq!(json["orderType"], "STOP");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY");
+    }
+
+    #[test]
+    fn buy_stop_limit_produces_stop_limit_order() {
+        let json = build_json(
+            &EquityActionKind::Buy,
+            "SPY",
+            10.0,
+            Some(405.0),
+            Some(400.0),
+        );
+        assert_eq!(json["orderType"], "STOP_LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY");
+    }
+
+    #[test]
+    fn sell_market_produces_market_order() {
+        let json = build_json(&EquityActionKind::Sell, "AAPL", 5.0, None, None);
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL");
+    }
+
+    #[test]
+    fn sell_limit_sets_price() {
+        let json = build_json(&EquityActionKind::Sell, "MSFT", 3.0, Some(100.0), None);
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL");
+    }
+
+    #[test]
+    fn sell_stop_sets_stop_price() {
+        let json = build_json(&EquityActionKind::Sell, "GOOG", 2.0, None, Some(150.0));
+        assert_eq!(json["orderType"], "STOP");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL");
+    }
+
+    #[test]
+    fn sell_short_market_produces_market_order() {
+        let json = build_json(&EquityActionKind::SellShort, "TSLA", 10.0, None, None);
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_SHORT");
+    }
+
+    #[test]
+    fn sell_short_stop_sets_stop_price() {
+        let json = build_json(&EquityActionKind::SellShort, "SPY", 5.0, None, Some(380.0));
+        assert_eq!(json["orderType"], "STOP");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_SHORT");
+    }
+
+    #[test]
+    fn sell_short_stop_limit_sets_both_prices() {
+        let json = build_json(
+            &EquityActionKind::SellShort,
+            "QQQ",
+            3.0,
+            Some(350.0),
+            Some(345.0),
+        );
+        assert_eq!(json["orderType"], "STOP_LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_SHORT");
+    }
+
+    #[test]
+    fn buy_to_cover_market_produces_market_order() {
+        let json = build_json(&EquityActionKind::BuyToCover, "AAPL", 8.0, None, None);
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_COVER");
+    }
+
+    #[test]
+    fn buy_to_cover_limit_sets_price() {
+        let json = build_json(
+            &EquityActionKind::BuyToCover,
+            "GOOG",
+            4.0,
+            Some(120.0),
+            None,
+        );
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_COVER");
+    }
+
+    #[test]
+    fn buy_to_cover_stop_limit_sets_both_prices() {
+        let json = build_json(
+            &EquityActionKind::BuyToCover,
+            "MSFT",
+            6.0,
+            Some(200.0),
+            Some(195.0),
+        );
+        assert_eq!(json["orderType"], "STOP_LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_COVER");
+    }
+
+    #[tokio::test]
+    async fn execute_equity_dry_run_returns_json() {
+        use crate::cli::{CommonOrderArgs, EquityOrderArgs};
+
+        let result = execute_equity(
+            EquityActionKind::Buy,
+            EquityOrderArgs {
+                symbol: "AAPL".to_string(),
+                quantity: 10.0,
+                price: Some(150.0),
+                stop: None,
+                common: CommonOrderArgs {
+                    account: None,
+                    session: SessionChoice::Normal,
+                    duration: DurationChoice::Day,
+                    save_preview: false,
+                    preview_first: false,
+                },
+            },
+        )
+        .await;
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY");
+    }
 }

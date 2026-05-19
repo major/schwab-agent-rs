@@ -357,4 +357,44 @@ mod tests {
         assert_eq!(json["orderType"], "LIMIT");
         assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_OPEN");
     }
+
+    #[test]
+    fn sell_to_open_market_produces_market_order() {
+        let json = build_json(
+            &OptionActionKind::SellToOpen,
+            "SPY   250620P00400000",
+            1.0,
+            None,
+        );
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "SELL_TO_OPEN");
+    }
+
+    #[test]
+    fn buy_to_close_market_produces_market_order() {
+        let json = build_json(
+            &OptionActionKind::BuyToClose,
+            "MSFT  250620C00400000",
+            2.0,
+            None,
+        );
+        assert_eq!(json["orderType"], "MARKET");
+        assert_eq!(json["orderLegCollection"][0]["instruction"], "BUY_TO_CLOSE");
+    }
+
+    #[test]
+    fn sell_to_close_limit_sets_price() {
+        let json = build_json(
+            &OptionActionKind::SellToClose,
+            "TSLA  250117P00200000",
+            1.0,
+            Some(8.75),
+        );
+        assert_eq!(json["orderType"], "LIMIT");
+        assert_eq!(
+            json["orderLegCollection"][0]["instruction"],
+            "SELL_TO_CLOSE"
+        );
+        assert!(json["price"].as_f64().is_some() || json["price"].as_str().is_some());
+    }
 }
