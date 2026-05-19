@@ -73,7 +73,7 @@ src/
 
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
-- **account** - Account discovery, balances, positions (with field selection), and resolution
+- **account** - Account discovery, balances, positions, and resolution
 - **order** - Unified order workflow: equity and option placement, lifecycle (get, cancel, replace), raw JSON
 - **option** - Option chain data (expirations, chain, screen, contract)
 - **ta** - Technical analysis (dashboard, expected-move)
@@ -141,7 +141,7 @@ Row-based output (columns + rows arrays) for expirations, chain, and screen. Fla
 
 ### Account Position Output
 
-`account --positions` is token-optimized by default and returns row-based output with `columns`, `rows`, and `rowCount` per account. Default columns are `sym`, `long_qty`, `avg`, `mktval`, `pnl`, and `pnlpct`. Use `--fields` to select position columns by compact names or full aliases such as `symbol`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Use `--all-fields` to return curated compact position objects with all 9 fields. Both `--fields` and `--all-fields` require `--positions`.
+`account --positions` returns compact position objects with all curated fields Schwab provides: `symbol`, `cusip`, `instrument_id`, `description`, `asset_type`, `long_quantity`, `short_quantity`, `average_price`, `market_value`, `current_day_profit_loss`, and `current_day_profit_loss_percentage`. Missing Schwab fields are omitted from each position object; `cusip` and `instrument_id` are included when available so positions without symbols still have actionable instrument identifiers. A selector alone resolves a nickname or hash to the canonical account hash; a selector plus `--positions` returns a filtered account summary for the matching account.
 
 ### Market Quote and History Output
 
