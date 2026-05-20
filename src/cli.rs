@@ -478,7 +478,7 @@ impl AccountArgs {
 /// Unified order command covering equity and option workflows.
 ///
 /// Use `order equity` for stock trades and `order option` for option trades.
-/// The `get`, `cancel`, `replace`, `place-from-preview`, `preview-raw`, and
+/// The `get`, `cancel`, `replace`, `repeat`, `place-from-preview`, `preview-raw`, and
 /// `place-raw` subcommands work with orders of any type.
 #[derive(Debug, Subcommand)]
 pub enum OrderCommand {
@@ -500,6 +500,8 @@ pub enum OrderCommand {
     Cancel(crate::order::lifecycle::OrderCancelArgs),
     /// Replace an existing order.
     Replace(ReplaceArgs),
+    /// Repeat an existing order by rebuilding it as a new order payload.
+    Repeat(crate::order::lifecycle::OrderRepeatArgs),
     /// Place an order from a previously saved preview digest.
     #[command(name = "place-from-preview")]
     PlaceFromPreview(PlaceFromPreviewArgs),

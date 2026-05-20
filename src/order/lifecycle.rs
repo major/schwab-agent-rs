@@ -13,6 +13,7 @@ use time::{Date, Month, OffsetDateTime, Time};
 use crate::auth;
 use crate::cli::Cli;
 use crate::error::AppError;
+use crate::order::workflow;
 use crate::raw;
 use crate::verify;
 
@@ -104,6 +105,54 @@ pub struct OrderCancelArgs {
         conflicts_with = "order_id"
     )]
     pub order_id_flag: Option<i64>,
+}
+
+/// Repeat an order by rebuilding its historical payload as a new order.
+///
+/// `--account` accepts a raw account hash or nickname and identifies both the
+/// account used to fetch the source order and the account that receives the new
+/// repeated order. Omit preview flags to place directly, use `--save-preview`
+/// to store a tamper-evident digest, or use `--preview-first` to preview then
+/// place automatically.
+#[derive(Debug, Args)]
+pub struct OrderRepeatArgs {
+    /// Account hash or nickname for the source and target account.
+    #[arg(short, long)]
+    pub account: String,
+
+    /// Order ID to repeat.
+    #[arg(
+        value_parser = clap::value_parser!(i64).range(1..),
+        required_unless_present = "order_id_flag"
+    )]
+    pub order_id: Option<i64>,
+
+    /// Order ID to repeat.
+    #[arg(
+        long = "order-id",
+        value_name = "ORDER_ID",
+        value_parser = clap::value_parser!(i64).range(1..),
+        conflicts_with = "order_id"
+    )]
+    pub order_id_flag: Option<i64>,
+
+    /// Preview the rebuilt order and save a digest instead of placing it.
+    #[arg(long, conflicts_with = "preview_first")]
+    pub save_preview: bool,
+
+    /// Preview the rebuilt order first, then place automatically if accepted.
+    #[arg(long)]
+    pub preview_first: bool,
+}
+
+impl OrderRepeatArgs {
+    /// Returns the order ID supplied either positionally or via `--order-id`.
+    #[must_use]
+    pub fn order_id(&self) -> i64 {
+        self.order_id
+            .or(self.order_id_flag)
+            .expect("clap requires order_id or order_id_flag")
+    }
 }
 
 impl OrderCancelArgs {
@@ -234,6 +283,53 @@ pub(crate) async fn handle_cancel(_cli: &Cli, args: &OrderCancelArgs) -> Result<
     verify::action_value(result)
 }
 
+/// Rebuilds an existing order and routes it through the standard order workflow.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) async fn handle_repeat(args: &OrderRepeatArgs) -> Result<Value, AppError> {
+    let mode = workflow::determine_mode(
+        Some(args.account.clone()),
+        args.save_preview,
+        args.preview_first,
+    )?;
+    if repeat_mode_places_order(&mode) {
+        crate::config::require_mutable_enabled()?;
+    }
+
+    let provider = auth::provider()?;
+    let token = provider.token().await?;
+    let account_hash = crate::account::resolve_account(&token, &args.account)
+        .await?
+        .account_hash;
+    let client = provider.client().await?;
+    let order_id = args.order_id();
+    let source_order = client.get_order(&account_hash, order_id).await?;
+    let order = repeat_order_builder(&source_order, order_id)?;
+
+    workflow::execute_order(&client, &order, mode, "order repeat").await
+}
+
+/// Returns whether a repeat mode can place an order.
+#[must_use]
+fn repeat_mode_places_order(mode: &workflow::OrderMode) -> bool {
+    matches!(
+        mode,
+        workflow::OrderMode::Place { .. } | workflow::OrderMode::PreviewFirst { .. }
+    )
+}
+
+/// Converts a Schwab historical order into a repeatable order builder.
+fn repeat_order_builder(
+    order: &schwab::Order,
+    order_id: i64,
+) -> Result<schwab::OrderBuilder, AppError> {
+    schwab::OrderBuilder::try_from_order(order).map_err(|error| match error {
+        schwab::Error::OrderConversion(message) => {
+            AppError::OrderValidation(format!("cannot repeat order {order_id}: {message}"))
+        }
+        other => AppError::Schwab(other),
+    })
+}
+
 /// Normalizes active-order date arguments to RFC3339 instants.
 fn normalize_get_range(
     args: &OrderGetArgs,
@@ -335,9 +431,10 @@ mod tests {
 
     use super::{
         ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
-        render_order_discovery_response,
+        render_order_discovery_response, repeat_mode_places_order, repeat_order_builder,
     };
     use crate::cli::{Cli, Command, OrderCommand};
+    use crate::order::workflow;
 
     #[test]
     fn parse_order_get_no_args_means_all_active_orders() {
@@ -588,6 +685,88 @@ mod tests {
     }
 
     #[test]
+    fn parse_order_repeat() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "repeat",
+            "--account",
+            "HASH123",
+            "67890",
+        ]);
+        let Command::Order(OrderCommand::Repeat(args)) = cli.command else {
+            panic!("expected order repeat command");
+        };
+        assert_eq!(args.account, "HASH123");
+        assert_eq!(args.order_id(), 67890);
+        assert!(!args.save_preview);
+        assert!(!args.preview_first);
+    }
+
+    #[test]
+    fn parse_order_repeat_with_order_id_flag_and_preview() {
+        let cli = Cli::parse_from([
+            "schwab-agent",
+            "order",
+            "repeat",
+            "--account",
+            "Trading",
+            "--order-id",
+            "67890",
+            "--save-preview",
+        ]);
+        let Command::Order(OrderCommand::Repeat(args)) = cli.command else {
+            panic!("expected order repeat command");
+        };
+        assert_eq!(args.account, "Trading");
+        assert_eq!(args.order_id(), 67890);
+        assert!(args.save_preview);
+        assert!(!args.preview_first);
+    }
+
+    #[test]
+    fn parse_order_repeat_rejects_missing_order_id() {
+        assert!(
+            Cli::try_parse_from(["schwab-agent", "order", "repeat", "--account", "HASH123"])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_order_repeat_rejects_duplicate_order_ids() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "repeat",
+                "--account",
+                "HASH123",
+                "67890",
+                "--order-id",
+                "12345",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parse_order_repeat_rejects_conflicting_preview_modes() {
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "repeat",
+                "--account",
+                "HASH123",
+                "67890",
+                "--save-preview",
+                "--preview-first",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn parse_order_get_and_cancel_reject_non_positive_order_ids() {
         assert!(
             Cli::try_parse_from([
@@ -624,6 +803,87 @@ mod tests {
             ])
             .is_err()
         );
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "repeat",
+                "--account",
+                "HASH123",
+                "--order-id",
+                "0"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn repeat_mode_places_only_for_mutable_modes() {
+        assert!(!repeat_mode_places_order(&workflow::OrderMode::DryRun));
+        assert!(!repeat_mode_places_order(
+            &workflow::OrderMode::SavePreview {
+                account: "HASH123".to_string(),
+            }
+        ));
+        assert!(repeat_mode_places_order(&workflow::OrderMode::Place {
+            account: "HASH123".to_string(),
+        }));
+        assert!(repeat_mode_places_order(
+            &workflow::OrderMode::PreviewFirst {
+                account: "HASH123".to_string(),
+            }
+        ));
+    }
+
+    #[test]
+    fn repeat_order_builder_converts_supported_equity_order() {
+        let source_order: schwab::Order = serde_json::from_value(serde_json::json!({
+            "orderId": 67890,
+            "orderType": "LIMIT",
+            "session": "NORMAL",
+            "duration": "DAY",
+            "price": 150.25,
+            "orderStrategyType": "SINGLE",
+            "orderLegCollection": [{
+                "instruction": "BUY",
+                "quantity": 10,
+                "instrument": {
+                    "symbol": "AAPL",
+                    "assetType": "EQUITY"
+                }
+            }]
+        }))
+        .unwrap();
+
+        let order = repeat_order_builder(&source_order, 67890).unwrap();
+        let output = serde_json::to_value(order).unwrap();
+
+        assert_eq!(output["orderType"], "LIMIT");
+        assert_eq!(output["price"], "150.25");
+        assert_eq!(output["orderLegCollection"][0]["instruction"], "BUY");
+        assert_eq!(
+            output["orderLegCollection"][0]["instrument"]["symbol"],
+            "AAPL"
+        );
+        assert!(output.get("orderId").is_none());
+    }
+
+    #[test]
+    fn repeat_order_builder_maps_unsupported_order_conversion_to_validation() {
+        let source_order: schwab::Order = serde_json::from_value(serde_json::json!({
+            "orderId": 67890,
+            "orderType": "LIMIT",
+            "session": "NORMAL",
+            "duration": "DAY",
+            "price": 150.25,
+            "orderStrategyType": "SINGLE"
+        }))
+        .unwrap();
+
+        let error = repeat_order_builder(&source_order, 67890).unwrap_err();
+
+        assert_eq!(error.code(), "order.validation_failed");
+        assert!(error.to_string().contains("cannot repeat order 67890"));
     }
 
     #[test]
