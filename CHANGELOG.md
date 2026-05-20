@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2026-05-20
+
+### <!-- 3 -->⚡ Performance
+
+- *(account)* Parallelize account summary fetches
+
+
 ## [0.4.2] - 2026-05-20
 
 ### <!-- 1 -->🐛 Bug Fixes
