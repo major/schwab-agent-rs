@@ -243,7 +243,7 @@ Release automation uses three chained components triggered by git events:
 
 1. **git-cliff** (`cliff.toml` for CLI, `[changelog]` in `release-plz.toml` for CI) - Generates changelogs from Conventional Commits with emoji-prefixed groups (Features, Bug Fixes, Documentation, etc.). Skips `chore: release`, `chore(deps)`, `chore(pr)`, `chore(pull)` commits. The `[changelog]` section in `release-plz.toml` is the authoritative config for release PRs; `cliff.toml` is for standalone `git-cliff` CLI use only.
 2. **release-plz** (`cd.yml` + `release-plz.toml`) - Runs on push to main. A single job runs `release-plz/action` without a specific command, so it handles both release-pr and release in one run. Creates/updates a release PR, and when a version bump lands on main, publishes to crates.io and creates a git tag. Uses crates.io Trusted Publishing (OIDC with `id-token: write`), no `CARGO_REGISTRY_TOKEN`. `git_release_enable = false` because cargo-dist creates GitHub Releases.
-3. **cargo-dist** (`release.yml` + `dist-workspace.toml`) - Triggered by tag push matching `**[0-9]+.[0-9]+.[0-9]+*`. Builds cross-platform binaries for x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows. Generates shell and PowerShell installers. Creates the GitHub Release with all artifacts.
+3. **cargo-dist** (`release.yml` + `dist-workspace.toml`) - Triggered by tag push matching `**[0-9]+.[0-9]+.[0-9]+*`. Builds cross-platform binaries for x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows using Rust 1.95. Generates shell and PowerShell installers. Creates the GitHub Release with all artifacts.
 
 The `release-plz` job uses `RELEASE_PLZ_TOKEN` so release PR branch pushes trigger normal CI workflows.
 
@@ -290,7 +290,7 @@ Keep account hashes, tokens, and credentials out of logs, errors, tests, and doc
 - **nextest** (`.config/nextest.toml`): retry and timeout configuration.
 - **git-cliff** (`cliff.toml` for CLI, `[changelog]` in `release-plz.toml` for CI): changelog generation from Conventional Commits with emoji-prefixed groups.
 - **release-plz** (`release-plz.toml`, `.github/workflows/cd.yml`): push-to-main release PR and publish workflow with crates.io Trusted Publishing. Changelog config is inline in the `[changelog]` section (not via deprecated `changelog_config` file reference).
-- **cargo-dist** (`dist-workspace.toml`, `.github/workflows/release.yml`): tag-triggered cross-platform binary builds and GitHub Releases. `release.yml` is auto-generated; run `dist generate --ci github` to regenerate.
+- **cargo-dist** (`dist-workspace.toml`, `rust-toolchain.toml`, `.github/workflows/release.yml`): tag-triggered cross-platform binary builds and GitHub Releases using Rust 1.95. `release.yml` is auto-generated; run `dist generate --ci github` to regenerate.
 
 ## Files to Keep Updated
 
@@ -302,6 +302,7 @@ When the project changes (new commands, strategies, args, error codes, CI config
 - **`cliff.toml`** - git-cliff changelog configuration
 - **`release-plz.toml`** - release-plz configuration (semver check, changelog, git tags, crate publishing)
 - **`dist-workspace.toml`** - cargo-dist configuration (targets, installers, CI)
+- **`rust-toolchain.toml`** - pinned Rust release toolchain matching the MSRV
 - **`.github/workflows/cd.yml`** - push-to-main release-plz workflow
 - **`.github/workflows/release.yml`** - auto-generated cargo-dist workflow (do not edit manually)
 - **`.github/instructions/*.instructions.md`** - review instructions for workflow-specific policies
