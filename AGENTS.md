@@ -42,7 +42,7 @@ src/
     workflow.rs    - Order execution modes: dry-run, place, save-preview, preview-first
     replace.rs     - Replace an existing order with a new equity or option payload
     preview.rs     - SHA-256 tamper-evident preview with 15-min TTL (shared by equity + order)
-    lifecycle.rs   - Order lifecycle commands: get, cancel with post-action verification
+    lifecycle.rs   - Order lifecycle commands: get, cancel, repeat with post-action verification
   account/
     mod.rs         - Account command: summary when no selector is provided, resolver when selector is provided, balance renderer
     tests.rs       - Account module tests
@@ -74,7 +74,7 @@ src/
 - **auth** - Token management (status, login, login-url, exchange, refresh)
 - **market** - Market data (history, quote)
 - **account** - Account discovery, balances, positions, and resolution
-- **order** - Unified order workflow: equity and option placement, lifecycle (get, cancel, replace), raw JSON
+- **order** - Unified order workflow: equity and option placement, lifecycle (get, cancel, replace, repeat), raw JSON
 - **option** - Option chain data (expirations, chain, screen, contract)
 - **ta** - Technical analysis (dashboard, expected-move)
 - **analyze** - Multi-symbol analysis with partial-failure support
@@ -108,7 +108,7 @@ Agents should prefer limit-style pricing whenever practical: pass `--price` so o
 
 ### Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, cancel) check `~/.config/schwab-agent/config.json` for `"i-also-like-to-live-dangerously": true` before executing. The config file is shared with the Go CLI.
+All mutable commands (place, place-from-preview, place-raw, replace, repeat, cancel) check `~/.config/schwab-agent/config.json` for `"i-also-like-to-live-dangerously": true` before executing. The config file is shared with the Go CLI.
 
 - Missing config file or missing key = mutable operations disabled (safe default)
 - Guard function: `config::require_mutable_enabled()` returns `AppError::MutableDisabled` (exit code 10, error code `config.mutable_disabled`)
@@ -117,7 +117,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, cancel) che
 
 ### Post-Action Verification
 
-All mutable order actions (place, place-from-preview, place-raw, replace, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place/replace response only returns a Location header and order ID, not the actual order state.
+All mutable order actions (place, place-from-preview, place-raw, replace, repeat, cancel) immediately follow up with a GET to retrieve the order status. This is critical for LLM agents because Schwab's place/replace response only returns a Location header and order ID, not the actual order state.
 
 The verification module (`src/verify.rs`) provides:
 
@@ -127,10 +127,11 @@ The verification module (`src/verify.rs`) provides:
 
 ### Order Lifecycle Commands
 
-`order get`, `order replace`, and `order cancel` manage existing orders.
+`order get`, `order replace`, `order repeat`, and `order cancel` manage existing orders.
 
 - **get**: Discovery mode without `--order` queries orders through `raw::fetch_order_list()` so unexpected order activity values do not abort decoding. With no arguments, it returns active orders across all linked accounts. With `--account`, it returns active orders for that account only. Active means the returned `status` is in `ACTIVE_ORDER_STATUSES`; any other returned status is treated as inactive. `--include-inactive` keeps inactive orders instead of filtering them out. `--from` and `--to` accept `YYYY-MM-DD` or RFC3339; date-only values are inclusive UTC calendar days. Specific-order mode is `order get --account HASH_OR_NICKNAME --order ORDER_ID`, resolves the account, and fetches the one order by ID. Unknown activity enum values are preserved in `orders` and summarized in an optional sanitized `warnings` array.
 - **replace**: Replace an existing order by positive order ID. Requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new order payload. Includes post-replace verification via GET.
+- **repeat**: Repeat an existing order by positive order ID. Requires `--account`; the order ID can be passed positionally or with `--order-id`. Fetches the source order, converts it with `schwab::OrderBuilder::try_from_order`, and runs the rebuilt payload through the normal order workflow. Supports `SINGLE`, `TRIGGER`, and `OCO` orders with equity or option legs when Schwab can convert them. Use `--save-preview` for the recommended digest workflow. Unsupported historical shapes return `order.validation_failed`; use `order place-raw` when the complex payload needs manual adaptation.
 - **cancel**: Cancel by order ID, requires `--account`. The order ID can be passed positionally or with `--order-id`. Includes post-cancel verification via GET and only reports `verified` once the fetched status is `CANCELED`.
 
 ### Option Data Subcommands (4 total)
@@ -217,7 +218,7 @@ Always run both default and `decimal` feature configurations. CI does the same.
 - All command output is raw JSON data payloads; errors use `ErrorBody` struct
 - Errors use `AppError` variants with stable error codes, exit codes, categories, and hints
 - Equity and option order actions hardcode instruction (safety invariant)
-- Mutable order actions (place, replace, cancel) use `verify::verify_order()` for post-action verification
+- Mutable order actions (place, replace, repeat, cancel) use `verify::verify_order()` for post-action verification
 
 ### Testing
 
