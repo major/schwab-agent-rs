@@ -108,12 +108,12 @@ Agents should prefer limit-style pricing whenever practical: pass `--price` so o
 
 ### Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, repeat, cancel) check `~/.config/schwab-agent/config.json` for `"i-also-like-to-live-dangerously": true` before executing. The config file is shared with the Go CLI.
+Commands that submit, replace, repeat-place, or cancel orders check `~/.config/schwab-agent/config.json` for `"i-also-like-to-live-dangerously": true` before executing. The config file is shared with the Go CLI.
 
 - Missing config file or missing key = mutable operations disabled (safe default)
 - Guard function: `config::require_mutable_enabled()` returns `AppError::MutableDisabled` (exit code 10, error code `config.mutable_disabled`)
-- Guard is called inside the order/equity dispatch handlers, before any API call
-- Read-only commands (dry-run mode, get) are NOT gated
+- Guard is called inside the order dispatch handlers, before mutable API calls
+- Read-only commands (dry-run mode, get, repeat `--save-preview`) are NOT gated
 
 ### Post-Action Verification
 

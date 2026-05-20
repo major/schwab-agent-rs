@@ -52,7 +52,7 @@ export SCHWAB_CALLBACK_URL="https://127.0.0.1:8182"
 
 ### Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, repeat, cancel) are disabled by default. To enable them, set `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`:
+All commands that submit, replace, repeat-place, or cancel orders are disabled by default. To enable them, set `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`:
 
 ```json
 {
@@ -60,7 +60,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, repeat, can
 }
 ```
 
-This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, get, quote, etc.) are not affected.
+This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, get, quote, etc.) are not affected. `order repeat --save-preview` only previews and saves a digest, so it remains available without the mutable guard; direct repeat placement and `--preview-first` are gated.
 
 ## Command Groups
 

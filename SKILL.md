@@ -22,7 +22,7 @@ This crate is published as `schwab-agent-rs`. Releases are automated on push to 
 
 ## Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, repeat, cancel) require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, get) are not gated.
+Commands that submit, replace, repeat-place, or cancel orders require `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`. Without it, these commands return error code `config.mutable_disabled` (exit code 10). Read-only commands (build, preview, get) are not gated. `order repeat --save-preview` only previews and saves a digest, so it remains available without the mutable guard; direct repeat placement and `--preview-first` are gated.
 
 ## Auth
 
