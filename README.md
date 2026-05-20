@@ -69,11 +69,14 @@ This config file is shared with the Go CLI (`schwab-agent`). Missing config file
 Token management: `status`, `login`, `login-url`, `exchange`, `refresh`.
 
 ```bash
+schwab-agent auth login           # interactive login with local callback listener
 schwab-agent auth login-url       # get OAuth URL
 schwab-agent auth exchange --redirect-url "https://..."
 schwab-agent auth refresh         # refresh expired token
 schwab-agent auth status          # check token state
 ```
+
+`auth login` keeps the local HTTPS callback listener alive through browser certificate-warning probes and other incomplete requests. It exits only after receiving a complete Schwab OAuth callback, an OAuth error callback, a state mismatch, or the configured timeout.
 
 ### market
 

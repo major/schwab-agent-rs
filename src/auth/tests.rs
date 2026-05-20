@@ -1,7 +1,7 @@
 use std::{ffi::OsString, path::Path};
 
 use clap::Parser;
-use schwab::auth::{TokenData, TokenFile};
+use schwab::auth::{AuthContext, CallbackResult, TokenData, TokenFile};
 
 use crate::cli::Cli;
 
@@ -133,6 +133,99 @@ fn require_token_file_missing_path() {
         }
         other => panic!("expected TokenFileMissing, got {other:?}"),
     }
+}
+
+// -- callback request parsing ---------------------------------------------
+
+#[test]
+fn callback_request_ignores_browser_probe_without_oauth_params() {
+    let request = "GET / HTTP/1.1\r\nhost: 127.0.0.1:8182\r\n\r\n";
+
+    assert!(matches!(
+        super::parse_callback_request(request, "/"),
+        super::CallbackOutcome::Continue
+    ));
+}
+
+#[test]
+fn callback_request_ignores_unexpected_path() {
+    let request = "GET /favicon.ico HTTP/1.1\r\nhost: 127.0.0.1:8182\r\n\r\n";
+
+    assert!(matches!(
+        super::parse_callback_request(request, "/callback"),
+        super::CallbackOutcome::Continue
+    ));
+}
+
+#[test]
+fn callback_request_accepts_complete_oauth_callback() {
+    let request =
+        "GET /callback?code=abc123&state=state456 HTTP/1.1\r\nhost: 127.0.0.1:8182\r\n\r\n";
+
+    match super::parse_callback_request(request, "/callback") {
+        super::CallbackOutcome::Complete(result) => {
+            assert_eq!(result.code, "abc123");
+            assert_eq!(result.state, "state456");
+        }
+        _ => panic!("expected complete callback"),
+    }
+}
+
+#[test]
+fn callback_request_stops_on_oauth_error() {
+    let request = "GET /callback?error=access_denied&error_description=user%20cancelled HTTP/1.1\r\nhost: 127.0.0.1:8182\r\n\r\n";
+
+    match super::parse_callback_request(request, "/callback") {
+        super::CallbackOutcome::Fatal(message) => {
+            assert_eq!(message, "access_denied: user cancelled");
+        }
+        _ => panic!("expected fatal OAuth error"),
+    }
+}
+
+#[test]
+fn callback_redirect_url_encodes_code_and_state() {
+    let context = AuthContext {
+        callback_url: "https://127.0.0.1:8182/callback".to_string(),
+        authorization_url: String::new(),
+        state: "state with spaces".to_string(),
+    };
+    let result = CallbackResult {
+        code: "code/with?symbols".to_string(),
+        state: context.state.clone(),
+    };
+
+    let redirect_url = super::callback_redirect_url(&context, &result).unwrap();
+
+    assert_eq!(
+        redirect_url,
+        "https://127.0.0.1:8182/callback?code=code%2Fwith%3Fsymbols&state=state+with+spaces"
+    );
+}
+
+#[test]
+fn callback_stream_timeout_defaults_without_login_deadline() {
+    assert_eq!(
+        super::stream_io_timeout(None).unwrap(),
+        std::time::Duration::from_secs(10)
+    );
+}
+
+#[test]
+fn callback_stream_timeout_is_capped_by_login_deadline() {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+    let timeout = super::stream_io_timeout(Some(deadline)).unwrap();
+
+    assert!(timeout <= std::time::Duration::from_millis(50));
+    assert!(timeout > std::time::Duration::ZERO);
+}
+
+#[test]
+fn callback_stream_timeout_fails_after_login_deadline() {
+    let deadline = std::time::Instant::now() - std::time::Duration::from_millis(1);
+    let err = super::stream_io_timeout(Some(deadline)).unwrap_err();
+
+    assert!(err.to_string().contains("timed out waiting for callback"));
 }
 
 // -- AuthStatus::missing --------------------------------------------------

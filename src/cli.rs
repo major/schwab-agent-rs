@@ -135,7 +135,7 @@ pub struct AnalyzeArgs {
 pub enum AuthCommand {
     /// Show local token state without printing secrets.
     Status,
-    /// Full interactive login: open browser, listen for callback, exchange and save token.
+    /// Full interactive login: open browser, wait for a complete callback, exchange and save token.
     Login(LoginArgs),
     /// Build a browser authorization URL and open it in the default browser.
     LoginUrl(LoginUrlArgs),

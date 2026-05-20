@@ -34,6 +34,8 @@ schwab-agent auth refresh         # refresh expired token
 schwab-agent auth login           # interactive: opens browser, waits for callback
 ```
 
+`auth login` keeps listening through browser certificate-warning probes and other incomplete localhost requests. It stops when Schwab sends the full OAuth callback, returns an OAuth error, hits a state mismatch, or the login timeout expires.
+
 If you get `auth.token_missing`, run `login-url` then `exchange`. If `auth.expired`, run `refresh`.
 
 ## Market Data

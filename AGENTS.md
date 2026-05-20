@@ -79,6 +79,10 @@ src/
 - **ta** - Technical analysis (dashboard, expected-move)
 - **analyze** - Multi-symbol analysis with partial-failure support
 
+### Auth Callback Listener
+
+`auth login` owns its local HTTPS callback listener in `src/auth/mod.rs` instead of using the one-shot listener from `schwab::auth::start_login()`. The listener must keep accepting requests through browser certificate-warning probes, wrong paths, missing query parameters, and other incomplete localhost requests. It should stop only after a complete Schwab OAuth callback with `code` and matching `state`, an OAuth error callback, a state mismatch, a bind/listener error, or the login timeout. Manual/headless flows still use `auth login-url` plus `auth exchange`.
+
 ### Equity Order Actions (4 total)
 
 buy, sell, sell-short, buy-to-cover
@@ -180,6 +184,7 @@ Commands output raw JSON data payloads directly (no wrapper). Errors output an `
 - `thiserror` - Error derivation
 - `tokio` - Async runtime
 - `time` - Date/time handling
+- `rcgen` / `rustls` - Local HTTPS callback listener
 - `sha2` - Preview digest
 - `tempfile` (dev) - Test fixtures
 
