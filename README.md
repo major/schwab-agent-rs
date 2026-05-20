@@ -217,7 +217,7 @@ Releases are fully automated on push to main using three chained components:
 
 1. **git-cliff** generates changelogs from Conventional Commits
 2. **release-plz** creates/updates a release PR, publishes to crates.io via Trusted Publishing, and creates git tags
-3. **cargo-dist** builds cross-platform binaries (x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows) and creates GitHub Releases with shell and PowerShell installers
+3. **cargo-dist** builds cross-platform binaries with Rust 1.95 (x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows) and creates GitHub Releases with shell and PowerShell installers
 
 Push commits to `main`, release-plz opens a release PR. Merge it, and the pipeline publishes the crate, tags the release, builds binaries, and creates the GitHub Release automatically.
 

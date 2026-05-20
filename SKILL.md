@@ -18,7 +18,7 @@ Credentials can also live in `~/.config/schwab-agent/config.json`. Environment v
 
 ## Release Notes
 
-This crate is published as `schwab-agent-rs`. Releases are automated on push to main: release-plz creates release PRs from Conventional Commits, publishes to crates.io with Trusted Publishing, and creates git tags. cargo-dist then builds cross-platform binaries and creates GitHub Releases with shell and PowerShell installers.
+This crate is published as `schwab-agent-rs`. Releases are automated on push to main: release-plz creates release PRs from Conventional Commits, publishes to crates.io with Trusted Publishing, and creates git tags. cargo-dist then builds cross-platform binaries with Rust 1.95 and creates GitHub Releases with shell and PowerShell installers.
 
 ## Mutable Operation Guard
 
