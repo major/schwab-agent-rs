@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-05-20
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(release)* Pin cargo-dist toolchain ([#78](https://github.com/major/schwab-agent-rs/issues/78))
+- *(auth)* Keep callback listener alive for probes
+
+
 ## [0.4.1] - 2026-05-20
 
 ### <!-- 0 -->🚀 Features
