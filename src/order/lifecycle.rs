@@ -1,9 +1,8 @@
-//! Order lifecycle commands: get, cancel.
+//! Order lifecycle commands: get, cancel, repeat.
 //!
 //! These commands let agents inspect and manage existing orders rather than
-//! only creating new ones. The cancel command includes post-action
-//! verification (follow-up GET) so the agent gets immediate confirmation
-//! instead of an empty 200 response.
+//! only creating new ones. Cancel and repeat commands include post-action
+//! verification where Schwab returns a newly affected order to inspect.
 
 use clap::Args;
 use serde_json::Value;
@@ -300,6 +299,7 @@ pub(crate) async fn handle_repeat(args: &OrderRepeatArgs) -> Result<Value, AppEr
     let account_hash = crate::account::resolve_account(&token, &args.account)
         .await?
         .account_hash;
+    let mode = repeat_mode_with_account_hash(mode, account_hash.clone());
     let client = provider.client().await?;
     let order_id = args.order_id();
     let source_order = client.get_order(&account_hash, order_id).await?;
@@ -315,6 +315,25 @@ fn repeat_mode_places_order(mode: &workflow::OrderMode) -> bool {
         mode,
         workflow::OrderMode::Place { .. } | workflow::OrderMode::PreviewFirst { .. }
     )
+}
+
+/// Replaces the user-supplied account selector with the canonical account hash.
+fn repeat_mode_with_account_hash(
+    mode: workflow::OrderMode,
+    account_hash: String,
+) -> workflow::OrderMode {
+    match mode {
+        workflow::OrderMode::DryRun => workflow::OrderMode::DryRun,
+        workflow::OrderMode::SavePreview { .. } => workflow::OrderMode::SavePreview {
+            account: account_hash,
+        },
+        workflow::OrderMode::PreviewFirst { .. } => workflow::OrderMode::PreviewFirst {
+            account: account_hash,
+        },
+        workflow::OrderMode::Place { .. } => workflow::OrderMode::Place {
+            account: account_hash,
+        },
+    }
 }
 
 /// Converts a Schwab historical order into a repeatable order builder.
@@ -431,7 +450,8 @@ mod tests {
 
     use super::{
         ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
-        render_order_discovery_response, repeat_mode_places_order, repeat_order_builder,
+        render_order_discovery_response, repeat_mode_places_order, repeat_mode_with_account_hash,
+        repeat_order_builder,
     };
     use crate::cli::{Cli, Command, OrderCommand};
     use crate::order::workflow;
@@ -832,6 +852,40 @@ mod tests {
             &workflow::OrderMode::PreviewFirst {
                 account: "HASH123".to_string(),
             }
+        ));
+    }
+
+    #[test]
+    fn repeat_mode_with_account_hash_replaces_selector() {
+        let save_preview = repeat_mode_with_account_hash(
+            workflow::OrderMode::SavePreview {
+                account: "nickname".to_string(),
+            },
+            "HASH123".to_string(),
+        );
+        let preview_first = repeat_mode_with_account_hash(
+            workflow::OrderMode::PreviewFirst {
+                account: "nickname".to_string(),
+            },
+            "HASH123".to_string(),
+        );
+        let place = repeat_mode_with_account_hash(
+            workflow::OrderMode::Place {
+                account: "nickname".to_string(),
+            },
+            "HASH123".to_string(),
+        );
+
+        assert!(
+            matches!(save_preview, workflow::OrderMode::SavePreview { account } if account == "HASH123")
+        );
+        assert!(
+            matches!(preview_first, workflow::OrderMode::PreviewFirst { account } if account == "HASH123")
+        );
+        assert!(matches!(place, workflow::OrderMode::Place { account } if account == "HASH123"));
+        assert!(matches!(
+            repeat_mode_with_account_hash(workflow::OrderMode::DryRun, "HASH123".to_string()),
+            workflow::OrderMode::DryRun
         ));
     }
 
