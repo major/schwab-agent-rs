@@ -30,6 +30,7 @@ pub(crate) async fn handle(cli: &Cli, command: &OrderCommand) -> Result<Value, A
         OrderCommand::Get(args) => lifecycle::handle_get(cli, args).await,
         OrderCommand::Cancel(args) => lifecycle::handle_cancel(cli, args).await,
         OrderCommand::Replace(args) => replace::execute_replace(args).await,
+        OrderCommand::Repeat(args) => lifecycle::handle_repeat(args).await,
         OrderCommand::PlaceFromPreview(args) => dispatch_place_from_preview(args).await,
         OrderCommand::PreviewRaw(args) => dispatch_preview_raw(args).await,
         OrderCommand::PlaceRaw(args) => dispatch_place_raw(args).await,

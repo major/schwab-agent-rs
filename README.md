@@ -52,7 +52,7 @@ export SCHWAB_CALLBACK_URL="https://127.0.0.1:8182"
 
 ### Mutable Operation Guard
 
-All mutable commands (place, place-from-preview, place-raw, replace, cancel) are disabled by default. To enable them, set `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`:
+All commands that submit, replace, repeat-place, or cancel orders are disabled by default. To enable them, set `"i-also-like-to-live-dangerously": true` in `~/.config/schwab-agent/config.json`:
 
 ```json
 {
@@ -60,7 +60,7 @@ All mutable commands (place, place-from-preview, place-raw, replace, cancel) are
 }
 ```
 
-This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, get, quote, etc.) are not affected.
+This config file is shared with the Go CLI (`schwab-agent`). Missing config file or missing key defaults to disabled (safe default). Read-only commands (build, preview, get, quote, etc.) are not affected. `order repeat --save-preview` only previews and saves a digest, so it remains available without the mutable guard; direct repeat placement and `--preview-first` are gated.
 
 ## Command Groups
 
@@ -118,7 +118,7 @@ Unified order workflow for equity and option placement, lifecycle management, an
 
 The `-a`/`--account` flag controls execution mode: omit for dry-run (prints order JSON locally), pass `--account` to place directly, add `--save-preview` to preview and save a digest, or add `--preview-first` to preview then place automatically.
 
-Lifecycle subcommands: `get`, `cancel`, `replace`. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep inactive orders, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new payload.
+Lifecycle subcommands: `get`, `cancel`, `replace`, `repeat`. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep inactive orders, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new payload. `repeat` fetches an existing order, rebuilds a new order payload from the supported historical fields, and can place directly, save a preview digest, or preview first.
 
 ```bash
 # Equity orders
@@ -138,6 +138,7 @@ schwab-agent order get --account HASH_OR_NICKNAME
 schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
 schwab-agent order get --account HASH_OR_NICKNAME --order 12345678
 schwab-agent order replace -a HASH --order-id 12345678 equity buy AAPL -q 10 --price 148.00
+schwab-agent order repeat -a HASH_OR_NICKNAME --order-id 12345678 --save-preview
 schwab-agent order cancel --account HASH --order-id 12345678
 ```
 
@@ -189,13 +190,15 @@ Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 ### Post-Action Verification
 
-All mutable order actions (place, place-from-preview, place-raw, replace, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
+All mutable order actions (place, place-from-preview, place-raw, replace, repeat, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
 
 `order get` defaults to cross-account active-order discovery. Active orders are returned orders whose `status` exactly matches one of the strings in the `active_statuses` output field. Any other returned status is treated as inactive and is included only with `--include-inactive`. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break discovery. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
 
 `order get --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`. Date filters, `--recent`, and `--include-inactive` are discovery-mode filters and cannot be combined with `--order`.
 
 `order cancel` accepts the order ID either positionally (`order cancel --account HASH 12345678`) or as `--order-id 12345678`.
+
+`order repeat` accepts the order ID either positionally (`order repeat --account HASH 12345678`) or as `--order-id 12345678`. It supports Schwab order conversion for `SINGLE`, `TRIGGER`, and `OCO` orders with equity or option legs. Response-only metadata such as the original order ID, status, timestamps, account number, and fill history is dropped before the new payload is submitted or saved. Unsupported historical shapes return `order.validation_failed`; use `order place-raw` when you need to manually adapt a complex order Schwab cannot convert.
 
 ## Testing
 

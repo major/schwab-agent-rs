@@ -94,56 +94,105 @@ pub async fn execute_order(
         OrderMode::Place { account } => {
             crate::config::require_mutable_enabled()?;
             let account_hash = resolve_account_hash(&account).await?;
-            let response = client.place_order(&account_hash, order).await?;
-            let order_json = serde_json::to_value(order)?;
-
-            let result = crate::verify::verify_order(
-                client,
-                &account_hash,
-                response.order_id,
-                "place",
-                response.location,
-                Some(order_json),
-            )
-            .await;
-
-            crate::verify::action_value(result)
+            place_order(client, order, &account_hash).await
         }
 
         OrderMode::SavePreview { account } => {
             let account_hash = resolve_account_hash(&account).await?;
-            let _preview = client.preview_order(&account_hash, order).await?;
-            let order_json = serde_json::to_value(order)?;
-            let digest = crate::order::preview::save_preview(&account_hash, order, command_label)?;
-
-            Ok(json!({
-                "order": order_json,
-                "preview": "accepted",
-                "digest": digest,
-                "digest_ttl_seconds": 900,
-            }))
+            save_preview(client, order, &account_hash, command_label).await
         }
 
         OrderMode::PreviewFirst { account } => {
             crate::config::require_mutable_enabled()?;
             let account_hash = resolve_account_hash(&account).await?;
-            let _preview = client.preview_order(&account_hash, order).await?;
-            let response = client.place_order(&account_hash, order).await?;
-            let order_json = serde_json::to_value(order)?;
-
-            let result = crate::verify::verify_order(
-                client,
-                &account_hash,
-                response.order_id,
-                "place",
-                response.location,
-                Some(order_json),
-            )
-            .await;
-
-            crate::verify::action_value(result)
+            preview_first(client, order, &account_hash).await
         }
     }
+}
+
+/// Executes an order workflow with an already-resolved canonical account hash.
+///
+/// This is useful when a command must fetch a source resource from the same
+/// account before routing a new payload through the standard order workflow.
+/// It preserves the normal mode behavior without repeating account discovery.
+///
+/// # Errors
+///
+/// Returns `AppError` on serialization failures, Schwab API errors, or when
+/// mutable operations are disabled for modes that can place orders.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub async fn execute_order_with_account_hash(
+    client: &schwab::Client,
+    order: &schwab::OrderBuilder,
+    mode: OrderMode,
+    account_hash: &str,
+    command_label: &str,
+) -> Result<Value, AppError> {
+    match mode {
+        OrderMode::DryRun => Ok(serde_json::to_value(order)?),
+        OrderMode::Place { .. } => {
+            crate::config::require_mutable_enabled()?;
+            place_order(client, order, account_hash).await
+        }
+        OrderMode::SavePreview { .. } => {
+            save_preview(client, order, account_hash, command_label).await
+        }
+        OrderMode::PreviewFirst { .. } => {
+            crate::config::require_mutable_enabled()?;
+            preview_first(client, order, account_hash).await
+        }
+    }
+}
+
+/// Places an order and returns the post-place verification payload.
+async fn place_order(
+    client: &schwab::Client,
+    order: &schwab::OrderBuilder,
+    account_hash: &str,
+) -> Result<Value, AppError> {
+    let response = client.place_order(account_hash, order).await?;
+    let order_json = serde_json::to_value(order)?;
+
+    let result = crate::verify::verify_order(
+        client,
+        account_hash,
+        response.order_id,
+        "place",
+        response.location,
+        Some(order_json),
+    )
+    .await;
+
+    crate::verify::action_value(result)
+}
+
+/// Previews an order and saves a digest for later placement.
+async fn save_preview(
+    client: &schwab::Client,
+    order: &schwab::OrderBuilder,
+    account_hash: &str,
+    command_label: &str,
+) -> Result<Value, AppError> {
+    let _preview = client.preview_order(account_hash, order).await?;
+    let order_json = serde_json::to_value(order)?;
+    let digest = crate::order::preview::save_preview(account_hash, order, command_label)?;
+
+    Ok(json!({
+        "order": order_json,
+        "preview": "accepted",
+        "digest": digest,
+        "digest_ttl_seconds": 900,
+    }))
+}
+
+/// Previews an order, places it, and returns post-place verification.
+async fn preview_first(
+    client: &schwab::Client,
+    order: &schwab::OrderBuilder,
+    account_hash: &str,
+) -> Result<Value, AppError> {
+    let _preview = client.preview_order(account_hash, order).await?;
+    place_order(client, order, account_hash).await
 }
 
 /// Places an order from a previously saved preview digest.
