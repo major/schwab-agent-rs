@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-05-20
+
+### <!-- 0 -->🚀 Features
+
+- Add repeat order command ([#77](https://github.com/major/schwab-agent-rs/issues/77))
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(deps)* Update rust crate schwab to 0.3.0 ([#75](https://github.com/major/schwab-agent-rs/issues/75))
+
+
 ## [0.4.0] - 2026-05-19
 
 ### <!-- 0 -->🚀 Features
