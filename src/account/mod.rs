@@ -3,7 +3,7 @@ use serde_json::{Value, to_value};
 
 use schwab::{
     Account, AccountNumberHash, AccountsInstrument, CashBalance, MarginBalance, SecuritiesAccount,
-    UserPreferenceAccount,
+    UserPreference, UserPreferenceAccount,
 };
 
 use crate::auth;
@@ -122,6 +122,14 @@ pub fn build_account_row(hash_value: String, pref: Option<&UserPreferenceAccount
     }
 }
 
+fn preference_accounts(preferences: Vec<UserPreference>) -> Vec<UserPreferenceAccount> {
+    preferences
+        .into_iter()
+        .filter_map(|preference| preference.accounts)
+        .flatten()
+        .collect()
+}
+
 /// Fetches accounts, account hashes, and user preferences, then renders compact
 /// account rows with balance summaries.
 ///
@@ -140,20 +148,28 @@ pub async fn run_summary(
     with_positions: bool,
     selector: Option<&str>,
 ) -> Result<AccountSummaryData, AppError> {
-    let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
-    let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
-    let prefs: Vec<UserPreferenceAccount> = preferences
-        .into_iter()
-        .filter_map(|preference| preference.accounts)
-        .flatten()
-        .collect();
-    let selected_hash = selector
-        .map(|value| resolve_account_from_data(&hashes, &prefs, value))
-        .transpose()?
-        .map(|account| account.account_hash);
-
+    let http = reqwest::Client::new();
     let fields = with_positions.then_some("positions");
-    let accounts = crate::raw::fetch_accounts(bearer_token, fields).await?;
+    let (hashes, prefs, accounts, selected_hash) = if let Some(selector) = selector {
+        let (hashes, preferences) = tokio::try_join!(
+            crate::raw::fetch_account_numbers_with_client(&http, bearer_token),
+            crate::raw::fetch_user_preference_with_client(&http, bearer_token),
+        )?;
+        let prefs = preference_accounts(preferences);
+        let selected_hash = resolve_account_from_data(&hashes, &prefs, selector)?.account_hash;
+        let accounts = crate::raw::fetch_accounts_with_client(&http, bearer_token, fields).await?;
+
+        (hashes, prefs, accounts, Some(selected_hash))
+    } else {
+        let (hashes, preferences, accounts) = tokio::try_join!(
+            crate::raw::fetch_account_numbers_with_client(&http, bearer_token),
+            crate::raw::fetch_user_preference_with_client(&http, bearer_token),
+            crate::raw::fetch_accounts_with_client(&http, bearer_token, fields),
+        )?;
+        let prefs = preference_accounts(preferences);
+
+        (hashes, prefs, accounts, None)
+    };
 
     let mut summary = render_summary_from_data(&accounts, &hashes, &prefs, with_positions);
     if let Some(account_hash) = selected_hash.as_deref() {
@@ -458,13 +474,12 @@ pub async fn resolve_account(
     bearer_token: &str,
     selector: &str,
 ) -> Result<AccountResolveData, AppError> {
-    let hashes = crate::raw::fetch_account_numbers(bearer_token).await?;
-    let preferences = crate::raw::fetch_user_preference(bearer_token).await?;
-    let prefs = preferences
-        .into_iter()
-        .filter_map(|preference| preference.accounts)
-        .flatten()
-        .collect::<Vec<_>>();
+    let http = reqwest::Client::new();
+    let (hashes, preferences) = tokio::try_join!(
+        crate::raw::fetch_account_numbers_with_client(&http, bearer_token),
+        crate::raw::fetch_user_preference_with_client(&http, bearer_token),
+    )?;
+    let prefs = preference_accounts(preferences);
 
     resolve_account_from_data(&hashes, &prefs, selector)
 }

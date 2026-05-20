@@ -62,10 +62,10 @@ pub(crate) struct OrderListQuery<'a> {
     pub(crate) status: Option<&'a str>,
 }
 
-/// Fetches accounts from the Schwab API with response normalization.
+/// Fetches accounts using a caller-provided HTTP client.
 ///
-/// Makes a direct HTTP request (bypassing the `schwab` crate's typed
-/// deserialization) so the response JSON can be normalized before parsing.
+/// Reusing one client lets callers preserve connection pooling when multiple
+/// raw Schwab requests are made as part of one command.
 ///
 /// # Errors
 ///
@@ -73,11 +73,11 @@ pub(crate) struct OrderListQuery<'a> {
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<Account>`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub async fn fetch_accounts(
+pub(crate) async fn fetch_accounts_with_client(
+    http: &reqwest::Client,
     bearer_token: &str,
     fields: Option<&str>,
 ) -> Result<Vec<Account>, AppError> {
-    let http = reqwest::Client::new();
     let mut request = http.get(ACCOUNTS_URL).bearer_auth(bearer_token);
 
     if let Some(fields) = fields {
@@ -101,10 +101,10 @@ pub async fn fetch_accounts(
     Ok(serde_json::from_value(normalized)?)
 }
 
-/// Fetches account number hashes from the Schwab API with response normalization.
+/// Fetches account number hashes using a caller-provided HTTP client.
 ///
-/// Makes a direct HTTP request so object-wrapped account metadata responses can
-/// be normalized before deserializing into `Vec<AccountNumberHash>`.
+/// Reusing one client lets callers preserve connection pooling when multiple
+/// raw Schwab requests are made as part of one command.
 ///
 /// # Errors
 ///
@@ -112,18 +112,20 @@ pub async fn fetch_accounts(
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<AccountNumberHash>`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub async fn fetch_account_numbers(bearer_token: &str) -> Result<Vec<AccountNumberHash>, AppError> {
-    let value = fetch_json(ACCOUNT_NUMBERS_URL, bearer_token).await?;
+pub(crate) async fn fetch_account_numbers_with_client(
+    http: &reqwest::Client,
+    bearer_token: &str,
+) -> Result<Vec<AccountNumberHash>, AppError> {
+    let value = fetch_json_with_client(http, ACCOUNT_NUMBERS_URL, bearer_token).await?;
     let array = account_numbers_array(value)?;
 
     Ok(serde_json::from_value(array)?)
 }
 
-/// Fetches user preferences from the Schwab API with response normalization.
+/// Fetches user preferences using a caller-provided HTTP client.
 ///
-/// The `schwab` crate expects a sequence, but Schwab can return the preference
-/// object directly. This wraps a bare object as a one-item array while still
-/// accepting the historical array and named wrapper forms.
+/// Reusing one client lets callers preserve connection pooling when multiple
+/// raw Schwab requests are made as part of one command.
 ///
 /// # Errors
 ///
@@ -131,8 +133,11 @@ pub async fn fetch_account_numbers(bearer_token: &str) -> Result<Vec<AccountNumb
 /// non-success status, or the normalized JSON cannot be deserialized into
 /// `Vec<UserPreference>`.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub async fn fetch_user_preference(bearer_token: &str) -> Result<Vec<UserPreference>, AppError> {
-    let value = fetch_json(USER_PREFERENCE_URL, bearer_token).await?;
+pub(crate) async fn fetch_user_preference_with_client(
+    http: &reqwest::Client,
+    bearer_token: &str,
+) -> Result<Vec<UserPreference>, AppError> {
+    let value = fetch_json_with_client(http, USER_PREFERENCE_URL, bearer_token).await?;
     let array = normalize_user_preference_response(value);
 
     Ok(serde_json::from_value(array)?)
@@ -163,10 +168,14 @@ pub(crate) async fn fetch_order_list(
     fetch_json_query(&url, bearer_token, query).await
 }
 
-/// Fetches a Schwab API URL as raw JSON using bearer authentication.
+/// Fetches a Schwab API URL as raw JSON using a caller-provided HTTP client.
 #[cfg_attr(coverage_nightly, coverage(off))]
-async fn fetch_json(url: &str, bearer_token: &str) -> Result<Value, AppError> {
-    let response = reqwest::Client::new()
+async fn fetch_json_with_client(
+    http: &reqwest::Client,
+    url: &str,
+    bearer_token: &str,
+) -> Result<Value, AppError> {
+    let response = http
         .get(url)
         .bearer_auth(bearer_token)
         .send()
