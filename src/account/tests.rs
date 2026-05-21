@@ -5,7 +5,12 @@ use crate::account::{
     retain_account_summary,
 };
 use crate::error::AppError;
-use schwab::{AccountEquity, AccountsInstrument, InstrumentAssetType};
+use schwab::{
+    AccountCashEquivalent, AccountEquity, AccountFixedIncome, AccountMutualFund, AccountOption,
+    AccountsInstrument, InstrumentAssetType,
+};
+
+use super::{instrument_summary, preference_accounts};
 
 fn number(value: f64) -> schwab::Number {
     serde_json::from_value(serde_json::json!(value)).unwrap()
@@ -562,6 +567,151 @@ fn make_cash_balance() -> schwab::CashBalance {
     }
 }
 
+fn position_with_instrument(instrument: AccountsInstrument) -> schwab::Position {
+    schwab::Position {
+        aged_quantity: None,
+        average_long_price: None,
+        average_price: None,
+        average_short_price: None,
+        current_day_cost: None,
+        current_day_profit_loss: None,
+        current_day_profit_loss_percentage: None,
+        instrument: Some(instrument),
+        long_open_profit_loss: None,
+        long_quantity: None,
+        maintenance_requirement: None,
+        market_value: None,
+        previous_session_long_quantity: None,
+        previous_session_short_quantity: None,
+        settled_long_quantity: None,
+        settled_short_quantity: None,
+        short_open_profit_loss: None,
+        short_quantity: None,
+        tax_lot_average_long_price: None,
+        tax_lot_average_short_price: None,
+    }
+}
+
+#[test]
+fn preference_accounts_flattens_only_present_account_lists() {
+    let accounts = preference_accounts(vec![
+        schwab::UserPreference {
+            accounts: Some(vec![make_pref(
+                "A1",
+                Some("Trading"),
+                Some("***1111"),
+                true,
+                "MARGIN",
+            )]),
+            streamer_info: None,
+            offers: None,
+        },
+        schwab::UserPreference {
+            accounts: None,
+            streamer_info: None,
+            offers: None,
+        },
+        schwab::UserPreference {
+            accounts: Some(vec![make_pref(
+                "A2",
+                Some("Cash"),
+                Some("***2222"),
+                false,
+                "CASH",
+            )]),
+            streamer_info: None,
+            offers: None,
+        },
+    ]);
+
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0].account_number.as_deref(), Some("A1"));
+    assert_eq!(accounts[1].account_number.as_deref(), Some("A2"));
+}
+
+#[test]
+fn selected_account_validation_accepts_non_empty_summary() {
+    let summary = AccountSummaryData {
+        accounts: vec![AccountRow {
+            account_hash: "HASH1".to_string(),
+            nickname: None,
+            display_account_id: None,
+            primary_account: None,
+            account_type: None,
+            is_closing_only_restricted: None,
+            is_day_trader: None,
+            balances: None,
+            positions: None,
+        }],
+    };
+
+    ensure_selected_account_rendered(&summary, "HASH1").unwrap();
+}
+
+#[test]
+fn instrument_summary_handles_all_account_instrument_variants() {
+    let cases = [
+        AccountsInstrument::Option(AccountOption {
+            asset_type: Some(InstrumentAssetType::Option),
+            cusip: Some("OPT-CUSIP".to_string()),
+            description: Some("Option contract".to_string()),
+            instrument_id: Some(1),
+            net_change: None,
+            option_deliverables: None,
+            option_multiplier: None,
+            put_call: None,
+            r#type: None,
+            symbol: Some("AAPL  260117C00150000".to_string()),
+            underlying_symbol: Some("AAPL".to_string()),
+        }),
+        AccountsInstrument::FixedIncome(AccountFixedIncome {
+            asset_type: Some(InstrumentAssetType::FixedIncome),
+            cusip: Some("FI-CUSIP".to_string()),
+            description: Some("Bond".to_string()),
+            factor: None,
+            instrument_id: Some(2),
+            maturity_date: None,
+            net_change: None,
+            symbol: Some("BOND".to_string()),
+            variable_rate: None,
+        }),
+        AccountsInstrument::CashEquivalent(AccountCashEquivalent {
+            asset_type: Some(InstrumentAssetType::CashEquivalent),
+            cusip: Some("CASH-CUSIP".to_string()),
+            description: Some("Sweep".to_string()),
+            instrument_id: Some(3),
+            net_change: None,
+            symbol: Some("SWEEP".to_string()),
+            r#type: None,
+        }),
+        AccountsInstrument::Equity(AccountEquity {
+            asset_type: Some(InstrumentAssetType::Equity),
+            cusip: Some("EQ-CUSIP".to_string()),
+            description: Some("Stock".to_string()),
+            instrument_id: Some(4),
+            net_change: None,
+            symbol: Some("MSFT".to_string()),
+        }),
+        AccountsInstrument::MutualFund(AccountMutualFund {
+            asset_type: Some(InstrumentAssetType::MutualFund),
+            cusip: Some("MF-CUSIP".to_string()),
+            description: Some("Fund".to_string()),
+            instrument_id: Some(5),
+            net_change: None,
+            symbol: Some("SWPPX".to_string()),
+        }),
+    ];
+
+    for instrument in cases {
+        let summary = instrument_summary(&instrument);
+        assert!(summary.symbol.is_some());
+        assert!(summary.cusip.is_some());
+        assert!(summary.instrument_id.is_some());
+        assert!(summary.description.is_some());
+        assert!(summary.asset_type.is_some());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // render_summary_from_data tests
 // ---------------------------------------------------------------------------
@@ -854,6 +1004,38 @@ fn account_summary_includes_account_flags() {
     assert_eq!(summary.accounts.len(), 1);
     assert_eq!(summary.accounts[0].is_closing_only_restricted, Some(true));
     assert_eq!(summary.accounts[0].is_day_trader, Some(false));
+}
+
+#[test]
+fn account_summary_cash_positions_are_compacted_when_requested() {
+    let hashes = [make_hash("A1", "HASH1")];
+    let prefs: Vec<schwab::UserPreferenceAccount> = vec![];
+    let positions = vec![position_with_instrument(AccountsInstrument::MutualFund(
+        AccountMutualFund {
+            asset_type: Some(InstrumentAssetType::MutualFund),
+            cusip: Some("808509855".to_string()),
+            description: Some("Index fund".to_string()),
+            instrument_id: Some(42),
+            net_change: None,
+            symbol: Some("SWPPX".to_string()),
+        },
+    ))];
+    let accounts = vec![make_cash_account(
+        "A1",
+        Some(make_cash_balance()),
+        Some(positions),
+    )];
+
+    let summary = render_summary_from_data(&accounts, &hashes, &prefs, true);
+
+    let positions = summary.accounts[0]
+        .positions
+        .as_ref()
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(positions[0]["symbol"], "SWPPX");
+    assert_eq!(positions[0]["asset_type"], "MutualFund");
 }
 
 #[test]

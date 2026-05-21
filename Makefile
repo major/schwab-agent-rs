@@ -26,10 +26,10 @@ doc:
 	RUSTDOCFLAGS="$(RUSTDOCFLAGS)" cargo doc --no-deps
 
 coverage:
-	cargo +nightly llvm-cov test --fail-under-lines 90 --ignore-filename-regex '(main|analyze/mod)\.rs$$'
+	RUSTFLAGS='--cfg coverage_nightly' cargo +nightly llvm-cov test --fail-under-lines 90 --ignore-filename-regex '(main|analyze/mod)\.rs$$'
 
 patch-coverage:
-	cargo llvm-cov test --ignore-filename-regex '(main|analyze/mod)\.rs$$' --lcov --output-path lcov.info
+	RUSTFLAGS='--cfg coverage_nightly' cargo +nightly llvm-cov test --ignore-filename-regex '(main|analyze/mod)\.rs$$' --lcov --output-path lcov.info
 	$(DIFF_COVER) lcov.info --compare-branch=$(PATCH_COVERAGE_BASE) --fail-under=$(PATCH_COVERAGE_FAIL_UNDER)
 
 audit:

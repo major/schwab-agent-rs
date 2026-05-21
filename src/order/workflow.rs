@@ -305,6 +305,7 @@ pub async fn execute_raw_place(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::to_number;
 
     #[test]
     fn no_account_is_dry_run() {
@@ -377,5 +378,67 @@ mod tests {
 
         let pf = determine_mode(Some("H".to_string()), false, true).unwrap();
         assert!(format!("{pf:?}").contains("PreviewFirst"));
+    }
+
+    fn sample_order() -> schwab::OrderBuilder {
+        schwab::OrderBuilder::limit_buy("AAPL", to_number(1.0).unwrap(), to_number(150.25).unwrap())
+            .session(schwab::Session::Normal)
+            .duration(schwab::Duration::Day)
+    }
+
+    fn sample_client() -> schwab::Client {
+        schwab::Client::new(schwab::Config::new().bearer_token("TOKEN"))
+    }
+
+    #[tokio::test]
+    async fn execute_order_dry_run_serializes_order_without_account_lookup() {
+        let client = sample_client();
+        let value = execute_order(
+            &client,
+            &sample_order(),
+            OrderMode::DryRun,
+            "order equity buy",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(value["orderType"], "LIMIT");
+        assert_eq!(value["session"], "NORMAL");
+        assert_eq!(value["duration"], "DAY");
+        assert_eq!(value["orderLegCollection"][0]["instruction"], "BUY");
+        assert_eq!(
+            value["orderLegCollection"][0]["instrument"]["symbol"],
+            "AAPL"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_order_with_account_hash_dry_run_ignores_account_hash() {
+        let client = sample_client();
+        let value = execute_order_with_account_hash(
+            &client,
+            &sample_order(),
+            OrderMode::DryRun,
+            "CANONICAL_HASH",
+            "order repeat",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(value["orderType"], "LIMIT");
+        assert_eq!(
+            value["price"],
+            serde_json::to_value(to_number(150.25).unwrap()).unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_raw_preview_rejects_invalid_json_before_account_lookup() {
+        let client = sample_client();
+        let err = execute_raw_preview(&client, "HASH", "{not json", false, "order preview-raw")
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("invalid JSON"));
     }
 }

@@ -176,6 +176,7 @@ mod tests {
 mod builder {
     use crate::error::AppError;
     use crate::shared::to_number;
+    use serde_json::Value;
 
     pub(crate) fn build_single_leg(
         underlying: &str,
@@ -253,5 +254,107 @@ mod builder {
         let strike = (strike * 1000.0).round() as u64;
 
         Ok(format!("{underlying:<6}{compact_date}{side}{strike:08}"))
+    }
+
+    fn order_json(order: &schwab::OrderBuilder) -> Value {
+        serde_json::to_value(order).unwrap()
+    }
+
+    #[test]
+    fn build_single_leg_creates_market_call_order() {
+        let order = build_single_leg(
+            "AAPL",
+            "2025-01-17",
+            150.0,
+            2,
+            None,
+            schwab::Session::Normal,
+            schwab::Duration::Day,
+            schwab::PutCall::Call,
+            schwab::Instruction::BuyToOpen,
+        )
+        .unwrap();
+        let value = order_json(&order);
+
+        assert_eq!(value["orderType"], "MARKET");
+        assert_eq!(value["session"], "NORMAL");
+        assert_eq!(value["duration"], "DAY");
+        assert_eq!(value["orderLegCollection"][0]["instruction"], "BUY_TO_OPEN");
+        assert_eq!(
+            value["orderLegCollection"][0]["instrument"]["symbol"],
+            "AAPL  250117C00150000"
+        );
+    }
+
+    #[test]
+    fn build_single_leg_creates_limit_put_order() {
+        let order = build_single_leg(
+            "MSFT",
+            "2026-06-19",
+            42.5,
+            3,
+            Some(1.25),
+            schwab::Session::Am,
+            schwab::Duration::GoodTillCancel,
+            schwab::PutCall::Put,
+            schwab::Instruction::SellToClose,
+        )
+        .unwrap();
+        let value = order_json(&order);
+
+        assert_eq!(value["orderType"], "LIMIT");
+        assert_eq!(value["session"], "AM");
+        assert_eq!(value["duration"], "GOOD_TILL_CANCEL");
+        assert_eq!(
+            value["orderLegCollection"][0]["instruction"],
+            "SELL_TO_CLOSE"
+        );
+        assert_eq!(
+            value["orderLegCollection"][0]["instrument"]["symbol"],
+            "MSFT  260619P00042500"
+        );
+        assert_eq!(
+            value["price"],
+            serde_json::to_value(to_number(1.25).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn build_single_leg_rejects_unsupported_instruction() {
+        let err = build_single_leg(
+            "AAPL",
+            "2025-01-17",
+            150.0,
+            1,
+            None,
+            schwab::Session::Normal,
+            schwab::Duration::Day,
+            schwab::PutCall::Call,
+            schwab::Instruction::Buy,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("unsupported option preview test instruction")
+        );
+    }
+
+    #[test]
+    fn build_single_leg_rejects_invalid_expiration() {
+        let err = build_single_leg(
+            "AAPL",
+            "25-01-17",
+            150.0,
+            1,
+            None,
+            schwab::Session::Normal,
+            schwab::Duration::Day,
+            schwab::PutCall::Call,
+            schwab::Instruction::BuyToOpen,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("expected YYYY-MM-DD"));
     }
 }
