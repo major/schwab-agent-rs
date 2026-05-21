@@ -200,6 +200,7 @@ make clippy       # Runs twice: default + --features decimal
 make test         # Runs twice: default + --features decimal
 make doc          # Checks for broken intra-doc links
 make coverage     # cargo llvm-cov test --fail-under-lines 90
+make patch-coverage # lcov + diff-cover, 100% changed-line threshold against main
 make audit        # cargo audit
 make check        # fmt + clippy + test + doc (aggregate)
 ```
@@ -230,12 +231,13 @@ Always run both default and `decimal` feature configurations. CI does the same.
 - nextest configured: default profile has 2 retries, 30s slow timeout, 1s leak timeout
 - CI profile: 3 retries, no fail-fast
 - Coverage threshold: 90% line coverage
+- Patch coverage threshold: 100% changed-line coverage via `make patch-coverage`. Override the base with `PATCH_COVERAGE_BASE=<branch>` or run with `DIFF_COVER='uvx diff-cover'` when `diff-cover` is not installed locally.
 
 ## CI
 
 ### ci.yml
 
-- fmt (nightly rustfmt), clippy (stable), test (stable), MSRV (1.95, `--locked`), docs (stable)
+- fmt (nightly rustfmt), clippy (stable), test (stable), MSRV (1.95, `--locked`), coverage upload to Codecov (stable + cargo-llvm-cov), docs (stable)
 - Uses pinned action SHAs
 
 ### audit.yml
@@ -291,6 +293,7 @@ Keep account hashes, tokens, and credentials out of logs, errors, tests, and doc
 ## Tooling Config
 
 - **CodeRabbit** (`.coderabbit.yaml`): auto-review disabled (manual trigger via `@coderabbitai review`). References `**/AGENTS.md` as code guideline source.
+- **Codecov** (`codecov.yml`): 90% project coverage with a 2% tolerance for the current baseline and 100% patch coverage gates. CI uploads `lcov.info`; local PR checks use `make patch-coverage` with `diff-cover`.
 - **Renovate**: weekly Monday dep updates, auto-merge patch/minor after 7 days.
 - **nextest** (`.config/nextest.toml`): retry and timeout configuration.
 - **git-cliff** (`cliff.toml` for CLI, `[changelog]` in `release-plz.toml` for CI): changelog generation from Conventional Commits with emoji-prefixed groups.
