@@ -12,29 +12,90 @@
 //!   return linked account hashes under a named object field.
 //! - **Boolean `false` for absent numerics** (GitHub #18): some numeric fields
 //!   serialize as `false` instead of `null` or `0`.
+//! - **New preview severities** (GitHub #89): the preview endpoint can return
+//!   validation severities before the typed `schwab` crate models know them.
 
 use schwab::{Account, AccountNumberHash, UserPreference};
+use serde::Serialize;
 use serde_json::Value;
+
+#[cfg(test)]
+use std::cell::RefCell;
 
 use crate::error::AppError;
 
 /// Schwab Trader API accounts endpoint.
+#[cfg(not(test))]
 const ACCOUNTS_URL: &str = "https://api.schwabapi.com/trader/v1/accounts";
 
 /// Schwab Trader API account number hash endpoint.
+#[cfg(not(test))]
 const ACCOUNT_NUMBERS_URL: &str = "https://api.schwabapi.com/trader/v1/accounts/accountNumbers";
 
 /// Schwab Trader API user preference endpoint.
+#[cfg(not(test))]
 const USER_PREFERENCE_URL: &str = "https://api.schwabapi.com/trader/v1/userPreference";
 
 /// Account number response fields that can contain linked account hashes.
 const ACCOUNT_NUMBER_ARRAY_FIELDS: &[&str] = &["accounts", "accountNumbers", "linkedAccounts"];
 
 /// Schwab Trader API cross-account orders endpoint.
+#[cfg(not(test))]
 const ORDERS_URL: &str = "https://api.schwabapi.com/trader/v1/orders";
 
 /// Schwab Trader API accounts endpoint prefix for per-account order listing.
 const ACCOUNT_ORDERS_URL_PREFIX: &str = "https://api.schwabapi.com/trader/v1/accounts";
+
+/// Stable warning code for non-fatal preview warnings.
+const PREVIEW_WARNING_CODE: &str = "order.preview_warning";
+
+#[cfg(test)]
+thread_local! {
+    static RAW_URL_PREFIX_FOR_TESTS: RefCell<Option<String>> = const { RefCell::new(None) };
+    static PREVIEW_ORDER_URL_PREFIX_FOR_TESTS: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) struct RawUrlPrefixGuard {
+    previous: Option<String>,
+}
+
+#[cfg(test)]
+impl Drop for RawUrlPrefixGuard {
+    fn drop(&mut self) {
+        RAW_URL_PREFIX_FOR_TESTS.with_borrow_mut(|prefix| {
+            *prefix = self.previous.take();
+        });
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_raw_url_prefix_for_tests(prefix: String) -> RawUrlPrefixGuard {
+    let previous =
+        RAW_URL_PREFIX_FOR_TESTS.with_borrow_mut(|override_prefix| override_prefix.replace(prefix));
+    RawUrlPrefixGuard { previous }
+}
+
+#[cfg(test)]
+pub(crate) struct PreviewOrderUrlPrefixGuard {
+    previous: Option<String>,
+}
+
+#[cfg(test)]
+impl Drop for PreviewOrderUrlPrefixGuard {
+    fn drop(&mut self) {
+        PREVIEW_ORDER_URL_PREFIX_FOR_TESTS.with_borrow_mut(|prefix| {
+            *prefix = self.previous.take();
+        });
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_preview_order_url_prefix_for_tests(prefix: String) -> PreviewOrderUrlPrefixGuard {
+    let previous = PREVIEW_ORDER_URL_PREFIX_FOR_TESTS
+        .with_borrow_mut(|override_prefix| override_prefix.replace(prefix));
+    PreviewOrderUrlPrefixGuard { previous }
+}
 
 /// Warning emitted when an order activity contains an unrecognized enum value.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -47,6 +108,23 @@ pub(crate) struct OrderActivityWarning {
     pub(crate) value: String,
     /// Count of activity entries containing this field/value pair.
     pub(crate) count: usize,
+}
+
+/// Non-fatal warning emitted by the Schwab preview endpoint.
+#[serde_with::skip_serializing_none]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreviewWarning {
+    /// Stable warning code for machine readers.
+    pub(crate) code: &'static str,
+    /// Schwab validation severity, usually `WARN`.
+    pub(crate) severity: String,
+    /// Human-readable validation message, when Schwab provides one.
+    pub(crate) message: Option<String>,
+    /// Human-readable activity message, when Schwab provides one.
+    pub(crate) activity_message: Option<String>,
+    /// Schwab validation rule identifier, when present.
+    pub(crate) validation_rule_name: Option<String>,
 }
 
 /// Parameters for raw order list requests.
@@ -78,7 +156,8 @@ pub(crate) async fn fetch_accounts_with_client(
     bearer_token: &str,
     fields: Option<&str>,
 ) -> Result<Vec<Account>, AppError> {
-    let mut request = http.get(ACCOUNTS_URL).bearer_auth(bearer_token);
+    let accounts_url = accounts_url();
+    let mut request = http.get(accounts_url).bearer_auth(bearer_token);
 
     if let Some(fields) = fields {
         request = request.query(&[("fields", fields)]);
@@ -116,7 +195,8 @@ pub(crate) async fn fetch_account_numbers_with_client(
     http: &reqwest::Client,
     bearer_token: &str,
 ) -> Result<Vec<AccountNumberHash>, AppError> {
-    let value = fetch_json_with_client(http, ACCOUNT_NUMBERS_URL, bearer_token).await?;
+    let account_numbers_url = account_numbers_url();
+    let value = fetch_json_with_client(http, &account_numbers_url, bearer_token).await?;
     let array = account_numbers_array(value)?;
 
     Ok(serde_json::from_value(array)?)
@@ -137,7 +217,8 @@ pub(crate) async fn fetch_user_preference_with_client(
     http: &reqwest::Client,
     bearer_token: &str,
 ) -> Result<Vec<UserPreference>, AppError> {
-    let value = fetch_json_with_client(http, USER_PREFERENCE_URL, bearer_token).await?;
+    let user_preference_url = user_preference_url();
+    let value = fetch_json_with_client(http, &user_preference_url, bearer_token).await?;
     let array = normalize_user_preference_response(value);
 
     Ok(serde_json::from_value(array)?)
@@ -160,12 +241,143 @@ pub(crate) async fn fetch_order_list(
     account_hash: Option<&str>,
     query: &OrderListQuery<'_>,
 ) -> Result<Value, AppError> {
-    let url = account_hash.map_or_else(
-        || ORDERS_URL.to_string(),
-        |hash| format!("{ACCOUNT_ORDERS_URL_PREFIX}/{hash}/orders"),
-    );
+    let url = account_hash.map_or_else(orders_url, |hash| {
+        format!("{}/{hash}/orders", account_orders_url_prefix())
+    });
 
     fetch_json_query(&url, bearer_token, query).await
+}
+
+#[cfg(test)]
+fn raw_url_prefix() -> String {
+    RAW_URL_PREFIX_FOR_TESTS
+        .with_borrow(Clone::clone)
+        .unwrap_or_else(|| "https://api.schwabapi.com/trader/v1".to_string())
+}
+
+#[must_use]
+#[cfg(test)]
+fn accounts_url() -> String {
+    format!("{}/accounts", raw_url_prefix())
+}
+
+#[must_use]
+#[cfg(not(test))]
+fn accounts_url() -> String {
+    ACCOUNTS_URL.to_string()
+}
+
+#[must_use]
+#[cfg(test)]
+fn account_numbers_url() -> String {
+    format!("{}/accounts/accountNumbers", raw_url_prefix())
+}
+
+#[must_use]
+#[cfg(not(test))]
+fn account_numbers_url() -> String {
+    ACCOUNT_NUMBERS_URL.to_string()
+}
+
+#[must_use]
+#[cfg(test)]
+fn user_preference_url() -> String {
+    format!("{}/userPreference", raw_url_prefix())
+}
+
+#[must_use]
+#[cfg(not(test))]
+fn user_preference_url() -> String {
+    USER_PREFERENCE_URL.to_string()
+}
+
+#[must_use]
+#[cfg(test)]
+fn orders_url() -> String {
+    format!("{}/orders", raw_url_prefix())
+}
+
+#[must_use]
+#[cfg(not(test))]
+fn orders_url() -> String {
+    ORDERS_URL.to_string()
+}
+
+#[must_use]
+#[cfg(test)]
+fn account_orders_url_prefix() -> String {
+    format!("{}/accounts", raw_url_prefix())
+}
+
+#[must_use]
+#[cfg(not(test))]
+fn account_orders_url_prefix() -> String {
+    ACCOUNT_ORDERS_URL_PREFIX.to_string()
+}
+
+/// Previews an order as raw JSON using a caller-provided HTTP client.
+///
+/// Schwab can return preview validation severities before the `schwab` crate's
+/// typed enum knows about them. Returning raw JSON keeps preview workflows
+/// resilient while still using the documented endpoint and bearer token.
+///
+/// Reusing one client lets callers preserve connection pooling when multiple
+/// raw Schwab requests are made as part of one command.
+///
+/// # Errors
+///
+/// Returns an error when the order cannot be serialized, the HTTP request fails,
+/// Schwab returns a non-success status, or the body is not valid JSON.
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) async fn preview_order_with_client<T: Serialize + ?Sized>(
+    http: &reqwest::Client,
+    bearer_token: &str,
+    account_hash: &str,
+    order: &T,
+) -> Result<Value, AppError> {
+    preview_order_at_url(http, &preview_order_url(account_hash), bearer_token, order).await
+}
+
+/// Returns the Schwab preview endpoint URL for an account hash.
+#[must_use]
+fn preview_order_url(account_hash: &str) -> String {
+    format!("{}/{account_hash}/previewOrder", preview_order_url_prefix())
+}
+
+#[cfg(test)]
+fn preview_order_url_prefix() -> String {
+    PREVIEW_ORDER_URL_PREFIX_FOR_TESTS
+        .with_borrow(Clone::clone)
+        .unwrap_or_else(|| ACCOUNT_ORDERS_URL_PREFIX.to_string())
+}
+
+#[cfg(not(test))]
+fn preview_order_url_prefix() -> &'static str {
+    ACCOUNT_ORDERS_URL_PREFIX
+}
+
+/// Previews an order as raw JSON against an explicit URL.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn preview_order_at_url<T: Serialize + ?Sized>(
+    http: &reqwest::Client,
+    url: &str,
+    bearer_token: &str,
+    order: &T,
+) -> Result<Value, AppError> {
+    let body = serde_json::to_value(order).map_err(schwab::Error::Encode)?;
+
+    post_json_with_client(http, url, bearer_token, &body).await
+}
+
+/// Extracts sanitized non-fatal warnings from a raw preview response.
+#[must_use]
+pub(crate) fn preview_warnings(value: &Value) -> Vec<PreviewWarning> {
+    value
+        .get("orderValidationResult")
+        .and_then(|result| result.get("warns"))
+        .and_then(Value::as_array)
+        .map(|warns| warns.iter().map(preview_warning).collect())
+        .unwrap_or_default()
 }
 
 /// Fetches a Schwab API URL as raw JSON using a caller-provided HTTP client.
@@ -178,6 +390,34 @@ async fn fetch_json_with_client(
     let response = http
         .get(url)
         .bearer_auth(bearer_token)
+        .send()
+        .await
+        .map_err(schwab::Error::Request)?;
+
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(schwab::Error::Request)?;
+        return Err(schwab::Error::HttpStatus { status, body }.into());
+    }
+
+    let text = response.text().await.map_err(schwab::Error::Request)?;
+
+    Ok(serde_json::from_str(&text)?)
+}
+
+/// Posts JSON to a Schwab API URL and returns the raw JSON response body.
+#[cfg_attr(coverage_nightly, coverage(off))]
+async fn post_json_with_client(
+    http: &reqwest::Client,
+    url: &str,
+    bearer_token: &str,
+    body: &Value,
+) -> Result<Value, AppError> {
+    let response = http
+        .post(url)
+        .bearer_auth(bearer_token)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .json(body)
         .send()
         .await
         .map_err(schwab::Error::Request)?;
@@ -230,6 +470,40 @@ async fn fetch_json_query(
     let text = response.text().await.map_err(schwab::Error::Request)?;
 
     Ok(serde_json::from_str(&text)?)
+}
+
+/// Converts one raw Schwab preview warning object into sanitized output.
+///
+/// The returned warning keeps only the stable code, normalized severity, and
+/// optional human-readable validation fields that are safe to show to agents.
+#[must_use]
+fn preview_warning(value: &Value) -> PreviewWarning {
+    PreviewWarning {
+        code: PREVIEW_WARNING_CODE,
+        severity: preview_warning_severity(value).to_string(),
+        message: optional_string(value, "message"),
+        activity_message: optional_string(value, "activityMessage"),
+        validation_rule_name: optional_string(value, "validationRuleName"),
+    }
+}
+
+/// Returns the best available warning severity label.
+#[must_use]
+fn preview_warning_severity(value: &Value) -> &str {
+    value
+        .get("originalSeverity")
+        .or_else(|| value.get("overrideSeverity"))
+        .and_then(Value::as_str)
+        .unwrap_or("WARN")
+}
+
+/// Extracts an optional string field from a JSON object.
+#[must_use]
+fn optional_string(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
 }
 
 /// Normalizes order list responses into a bare order array.
@@ -558,6 +832,10 @@ fn normalize_false_to_null(value: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
     use serde_json::json;
 
     use super::*;
@@ -869,6 +1147,377 @@ mod tests {
         let warning_json = serde_json::to_value(warnings).unwrap();
         assert!(!warning_json.to_string().contains("123456789"));
         assert!(!warning_json.to_string().contains("42"));
+    }
+
+    #[test]
+    fn preview_warns_emit_sanitized_warnings() {
+        let input = json!({
+            "orderId": 400001,
+            "orderStrategy": {
+                "accountNumber": "123456789",
+                "orderType": "STOP"
+            },
+            "orderValidationResult": {
+                "warns": [{
+                    "message": "Stop orders do not guarantee an execution price.",
+                    "activityMessage": "Review stop order risk before submitting.",
+                    "originalSeverity": "WARN",
+                    "validationRuleName": "STOP_ORDER_RISK"
+                }],
+                "accepts": [],
+                "alerts": [],
+                "rejects": [],
+                "reviews": []
+            }
+        });
+
+        let warnings = preview_warnings(&input);
+
+        assert_eq!(
+            warnings,
+            vec![PreviewWarning {
+                code: "order.preview_warning",
+                severity: "WARN".to_string(),
+                message: Some("Stop orders do not guarantee an execution price.".to_string()),
+                activity_message: Some("Review stop order risk before submitting.".to_string()),
+                validation_rule_name: Some("STOP_ORDER_RISK".to_string()),
+            }]
+        );
+
+        let warning_json = serde_json::to_value(warnings).unwrap();
+        assert!(!warning_json.to_string().contains("123456789"));
+        assert!(!warning_json.to_string().contains("400001"));
+    }
+
+    #[test]
+    fn preview_warns_default_to_warn_severity() {
+        let input = json!({
+            "orderValidationResult": {
+                "warns": [{"message": "Review before placing."}]
+            }
+        });
+
+        let warnings = preview_warnings(&input);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].severity, "WARN");
+        assert_eq!(
+            warnings[0].message.as_deref(),
+            Some("Review before placing.")
+        );
+    }
+
+    #[test]
+    fn preview_warns_use_override_severity_and_omit_non_strings() {
+        let input = json!({
+            "orderValidationResult": {
+                "warns": [{
+                    "message": 123,
+                    "activityMessage": "Review stop risk.",
+                    "overrideSeverity": "WARN",
+                    "validationRuleName": null
+                }]
+            }
+        });
+
+        let warnings = preview_warnings(&input);
+
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].severity, "WARN");
+        assert_eq!(warnings[0].message, None);
+        assert_eq!(
+            warnings[0].activity_message.as_deref(),
+            Some("Review stop risk.")
+        );
+        assert_eq!(warnings[0].validation_rule_name, None);
+
+        let serialized = serde_json::to_value(&warnings[0]).unwrap();
+        assert!(serialized.get("message").is_none());
+        assert!(serialized.get("validationRuleName").is_none());
+    }
+
+    #[test]
+    fn preview_warns_missing_or_non_array_warns_is_empty() {
+        assert!(preview_warnings(&json!({})).is_empty());
+        assert!(preview_warnings(&json!({"orderValidationResult": {}})).is_empty());
+        assert!(preview_warnings(&json!({"orderValidationResult": {"warns": false}})).is_empty());
+    }
+
+    #[test]
+    fn preview_order_url_targets_account_preview_endpoint() {
+        assert_eq!(
+            preview_order_url("HASH123"),
+            "https://api.schwabapi.com/trader/v1/accounts/HASH123/previewOrder"
+        );
+    }
+
+    #[tokio::test]
+    async fn preview_order_with_client_uses_configured_client_and_account_url() {
+        let (url, request) = spawn_json_response_at_path(
+            "/accounts/HASH123/previewOrder",
+            "HTTP/1.1 200 OK",
+            r#"{"preview":"accepted"}"#,
+        );
+        let prefix = url
+            .strip_suffix("/HASH123/previewOrder")
+            .unwrap()
+            .to_string();
+        let _preview_url = set_preview_order_url_prefix_for_tests(prefix);
+        let http = reqwest::Client::new();
+
+        let result =
+            preview_order_with_client(&http, "TOKEN123", "HASH123", &json!({"orderType": "STOP"}))
+                .await
+                .unwrap();
+
+        assert_eq!(result["preview"], "accepted");
+        assert!(
+            request
+                .join()
+                .unwrap()
+                .starts_with("POST /accounts/HASH123/previewOrder HTTP/1.1")
+        );
+    }
+
+    #[tokio::test]
+    async fn preview_order_at_url_posts_json_and_parses_response() {
+        let (url, request) = spawn_json_response(
+            "HTTP/1.1 200 OK",
+            r#"{"preview":"accepted","orderValidationResult":{"warns":[]}}"#,
+        );
+        let http = reqwest::Client::new();
+
+        let result = preview_order_at_url(
+            &http,
+            &url,
+            "TOKEN123",
+            &json!({"orderType": "STOP", "quantity": 1}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["preview"], "accepted");
+
+        let request = request.join().unwrap();
+        assert!(request.starts_with("POST /previewOrder HTTP/1.1"));
+        assert!(request.contains("authorization: Bearer TOKEN123"));
+        assert!(request.contains("accept: application/json"));
+        assert!(request.contains(r#"{"orderType":"STOP","quantity":1}"#));
+    }
+
+    #[tokio::test]
+    async fn preview_order_at_url_returns_http_status_errors() {
+        let (url, request) = spawn_json_response("HTTP/1.1 400 Bad Request", r#"{"error":"bad"}"#);
+        let http = reqwest::Client::new();
+
+        let err = preview_order_at_url(&http, &url, "TOKEN123", &json!({"orderType": "STOP"}))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.code(), "schwab.http_status");
+        assert!(err.to_string().contains("400"));
+        assert!(request.join().unwrap().contains("POST /previewOrder"));
+    }
+
+    fn spawn_json_response(
+        status_line: &'static str,
+        body: &'static str,
+    ) -> (String, JoinHandle<String>) {
+        spawn_json_response_at_path("/previewOrder", status_line, body)
+    }
+
+    fn spawn_json_response_at_path(
+        path: &'static str,
+        status_line: &'static str,
+        body: &'static str,
+    ) -> (String, JoinHandle<String>) {
+        spawn_json_method_response_at_path("POST", path, status_line, body)
+    }
+
+    fn spawn_json_method_response_at_path(
+        method: &'static str,
+        path: &'static str,
+        status_line: &'static str,
+        body: &'static str,
+    ) -> (String, JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}{}", listener.local_addr().unwrap(), path);
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 16];
+
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "client closed before headers were complete");
+                request.extend_from_slice(&buffer[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let headers_end = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .unwrap()
+                + 4;
+            let headers = String::from_utf8_lossy(&request[..headers_end]).to_ascii_lowercase();
+            let content_length = headers
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length: "))
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or_default();
+
+            while request.len() - headers_end < content_length {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "client closed before body was complete");
+                request.extend_from_slice(&buffer[..read]);
+            }
+
+            let response = format!(
+                "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with(&format!("{method} {path}")));
+            request
+        });
+
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn fetch_user_preference_with_client_uses_configured_client() {
+        let (url, request) =
+            spawn_json_method_response_at_path("GET", "/userPreference", "HTTP/1.1 200 OK", "[]");
+        let prefix = url.strip_suffix("/userPreference").unwrap().to_string();
+        let _raw_url = set_raw_url_prefix_for_tests(prefix);
+        let http = reqwest::Client::new();
+
+        let preferences = fetch_user_preference_with_client(&http, "TOKEN123")
+            .await
+            .unwrap();
+
+        assert!(preferences.is_empty());
+        assert!(
+            request
+                .join()
+                .unwrap()
+                .contains("authorization: Bearer TOKEN123")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_accounts_with_client_uses_configured_client_and_fields() {
+        let (url, request) = spawn_json_method_response_at_path(
+            "GET",
+            "/accounts",
+            "HTTP/1.1 200 OK",
+            r#"[{"securitiesAccount":{"type":"MARGIN","accountNumber":"A1"}}]"#,
+        );
+        let prefix = url.strip_suffix("/accounts").unwrap().to_string();
+        let _raw_url = set_raw_url_prefix_for_tests(prefix);
+        let http = reqwest::Client::new();
+
+        let accounts = fetch_accounts_with_client(&http, "TOKEN123", Some("positions"))
+            .await
+            .unwrap();
+
+        assert_eq!(accounts.len(), 1);
+        let request = request.join().unwrap();
+        assert!(request.contains("GET /accounts?fields=positions"));
+        assert!(request.contains("authorization: Bearer TOKEN123"));
+    }
+
+    #[tokio::test]
+    async fn fetch_account_numbers_with_client_uses_configured_client() {
+        let (url, request) = spawn_json_method_response_at_path(
+            "GET",
+            "/accounts/accountNumbers",
+            "HTTP/1.1 200 OK",
+            r#"[{"accountNumber":"A1","hashValue":"HASH123"}]"#,
+        );
+        let prefix = url
+            .strip_suffix("/accounts/accountNumbers")
+            .unwrap()
+            .to_string();
+        let _raw_url = set_raw_url_prefix_for_tests(prefix);
+        let http = reqwest::Client::new();
+
+        let hashes = fetch_account_numbers_with_client(&http, "TOKEN123")
+            .await
+            .unwrap();
+
+        assert_eq!(hashes[0].hash_value.as_deref(), Some("HASH123"));
+        assert!(
+            request
+                .join()
+                .unwrap()
+                .contains("GET /accounts/accountNumbers HTTP/1.1")
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_order_list_builds_cross_account_query() {
+        let (url, request) = spawn_json_method_response_at_path(
+            "GET",
+            "/orders",
+            "HTTP/1.1 200 OK",
+            r#"[{"orderId":1}]"#,
+        );
+        let prefix = url.strip_suffix("/orders").unwrap().to_string();
+        let _raw_url = set_raw_url_prefix_for_tests(prefix);
+        let query = OrderListQuery {
+            from_entered_time: "2026-01-01T00:00:00Z",
+            to_entered_time: "2026-01-02T00:00:00Z",
+            max_results: Some(10),
+            status: Some("WORKING"),
+        };
+
+        let orders = fetch_order_list("TOKEN123", None, &query).await.unwrap();
+
+        assert_eq!(orders[0]["orderId"], 1);
+        let request = request.join().unwrap();
+        assert!(request.contains("GET /orders?"));
+        assert!(request.contains("fromEnteredTime=2026-01-01T00%3A00%3A00Z"));
+        assert!(request.contains("toEnteredTime=2026-01-02T00%3A00%3A00Z"));
+        assert!(request.contains("maxResults=10"));
+        assert!(request.contains("status=WORKING"));
+    }
+
+    #[tokio::test]
+    async fn fetch_order_list_builds_account_query() {
+        let (url, request) = spawn_json_method_response_at_path(
+            "GET",
+            "/accounts/HASH123/orders",
+            "HTTP/1.1 200 OK",
+            r#"[]"#,
+        );
+        let prefix = url
+            .strip_suffix("/accounts/HASH123/orders")
+            .unwrap()
+            .to_string();
+        let _raw_url = set_raw_url_prefix_for_tests(prefix);
+        let query = OrderListQuery {
+            from_entered_time: "2026-01-01T00:00:00Z",
+            to_entered_time: "2026-01-02T00:00:00Z",
+            max_results: None,
+            status: None,
+        };
+
+        let orders = fetch_order_list("TOKEN123", Some("HASH123"), &query)
+            .await
+            .unwrap();
+
+        assert_eq!(orders, json!([]));
+        assert!(
+            request
+                .join()
+                .unwrap()
+                .contains("GET /accounts/HASH123/orders?")
+        );
     }
 
     // --- full pipeline ---

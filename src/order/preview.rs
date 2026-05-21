@@ -172,18 +172,12 @@ pub fn load_preview(digest: &str, account_hash: &str) -> Result<SavedPreview, Ap
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        ffi::OsString,
-        path::Path,
-        sync::{LazyLock, Mutex},
-    };
+    use std::{ffi::OsString, path::Path};
 
     use schwab::{Duration, Instruction, PutCall, Session};
 
     use super::*;
     use crate::order::builder;
-
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     struct EnvVarGuard {
         key: &'static str,
@@ -297,7 +291,7 @@ mod tests {
 
     #[test]
     fn load_rejects_account_mismatch() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = crate::config::TEST_ENV_LOCK.lock().unwrap();
         let temp_dir = tempfile::tempdir().unwrap();
         let _state_home = EnvVarGuard::set_path("XDG_STATE_HOME", temp_dir.path());
 

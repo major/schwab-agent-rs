@@ -85,6 +85,8 @@ The `-a`/`--account` flag controls execution mode:
 - `--account HASH --save-preview`: previews and saves digest
 - `--account HASH --preview-first`: previews then places automatically
 
+Non-fatal Schwab preview warnings do not block digest creation. When present, `--save-preview` and `preview-raw --save-preview` include sanitized `warnings` entries with severity, message, and validation rule fields; the saved digest still covers only the order payload and preview metadata.
+
 Prefer limit orders when practical: pass `--price` for limit orders. Omit `--price` only when a market order is explicitly desired.
 
 ```bash

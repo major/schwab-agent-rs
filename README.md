@@ -192,6 +192,8 @@ The recommended agent workflow uses tamper-evident previews:
 
 Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
+If Schwab accepts a preview with non-fatal validation warnings, the preview still saves a digest and includes a `warnings` array with sanitized message, severity, and validation rule fields. The saved digest continues to cover only the submitted order payload and preview metadata, so `place-from-preview` submits the exact order that was previewed.
+
 ### Post-Action Verification
 
 All mutable order actions (place, place-from-preview, place-raw, replace, repeat, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.

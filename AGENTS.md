@@ -108,6 +108,8 @@ The `-a`/`--account` flag controls execution mode:
 
 Recommended LLM workflow: pass `--save-preview` to get a digest, then `order place-from-preview --account HASH --digest DIGEST`. This submits the exact saved preview payload after the SHA-256 digest, 15-minute TTL, and account checks pass. Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
+Preview responses can include non-fatal Schwab validation warnings. `--save-preview` and `preview-raw --save-preview` keep these as sanitized `warnings` entries in the command output while still saving a usable digest. The saved preview file continues to store only the submitted order payload and metadata.
+
 Agents should prefer limit-style pricing whenever practical: pass `--price` so orders use `LIMIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
 
 ### Mutable Operation Guard

@@ -69,9 +69,7 @@ async fn dispatch_place_from_preview(args: &PlaceFromPreviewArgs) -> Result<Valu
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 async fn dispatch_preview_raw(args: &PreviewRawArgs) -> Result<Value, AppError> {
-    let client = crate::auth::provider()?.client().await?;
     workflow::execute_raw_preview(
-        &client,
         &args.account,
         &args.json,
         args.save_preview,
