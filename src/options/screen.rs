@@ -448,6 +448,79 @@ mod tests {
         }
     }
 
+    fn chain_from_json(value: Value) -> OptionChain {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn screen_chain_fixture() -> OptionChain {
+        chain_from_json(json!({
+            "symbol": "AAPL",
+            "underlyingPrice": 105.5,
+            "callExpDateMap": {
+                "2026-01-16:239": {
+                    "100.0": [{
+                        "symbol": "AAPL  260116C00100000",
+                        "description": "AAPL Jan 2026 100 Call",
+                        "bidPrice": 8.0,
+                        "askPrice": 8.4,
+                        "markPrice": 8.2,
+                        "lastPrice": 8.1,
+                        "strikePrice": 100.0,
+                        "delta": 0.62,
+                        "gamma": 0.04,
+                        "theta": -0.02,
+                        "vega": 0.11,
+                        "volatility": 30.0,
+                        "openInterest": 250,
+                        "totalVolume": 75,
+                        "timeValue": 3.2,
+                        "isInTheMoney": true
+                    }],
+                    "120.0": [{
+                        "symbol": "AAPL  260116C00120000",
+                        "description": "AAPL Jan 2026 120 Call",
+                        "bidPrice": 1.0,
+                        "askPrice": 1.8,
+                        "markPrice": 1.4,
+                        "lastPrice": 1.3,
+                        "strikePrice": 120.0,
+                        "delta": 0.28,
+                        "gamma": 0.03,
+                        "theta": -0.01,
+                        "vega": 0.08,
+                        "volatility": 28.0,
+                        "openInterest": 25,
+                        "totalVolume": 5,
+                        "timeValue": 1.4,
+                        "isInTheMoney": false
+                    }]
+                }
+            },
+            "putExpDateMap": {
+                "2026-01-16:239": {
+                    "95.0": [{
+                        "symbol": "AAPL  260116P00095000",
+                        "description": "AAPL Jan 2026 95 Put",
+                        "bidPrice": 2.5,
+                        "askPrice": 2.7,
+                        "markPrice": 2.6,
+                        "lastPrice": 2.55,
+                        "strikePrice": 95.0,
+                        "delta": -0.25,
+                        "gamma": 0.02,
+                        "theta": -0.01,
+                        "vega": 0.07,
+                        "volatility": 32.0,
+                        "openInterest": 120,
+                        "totalVolume": 40,
+                        "timeValue": 2.6,
+                        "isInTheMoney": false
+                    }]
+                }
+            }
+        }))
+    }
+
     #[test]
     fn build_chain_options_basic() {
         let args = default_screen_args("AAPL");
@@ -639,5 +712,136 @@ mod tests {
     fn parse_fields_skips_empty() {
         let fields = parse_fields("sym,,bid");
         assert_eq!(fields, vec!["sym", "bid"]);
+    }
+
+    #[test]
+    fn selected_fields_empty_string_falls_back_to_defaults() {
+        let mut args = default_screen_args("AAPL");
+        args.fields = Some(" , , ".to_string());
+
+        let fields = selected_fields(&args).unwrap();
+
+        assert_eq!(fields[0], SCREEN_FIELDS[0]);
+        assert_eq!(fields.len(), SCREEN_FIELDS.len());
+    }
+
+    #[test]
+    fn selected_fields_rejects_unknown_field() {
+        let mut args = default_screen_args("AAPL");
+        args.fields = Some("symbol,nope".to_string());
+
+        let error = selected_fields(&args).unwrap_err();
+
+        assert_eq!(error.code(), "options.validation_failed");
+        assert!(error.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn screen_chain_applies_filters_sort_and_limit() {
+        let mut args = default_screen_args("AAPL");
+        args.contract_type = Some("call".to_string());
+        args.dte_min = Some(200);
+        args.dte_max = Some(300);
+        args.strike_min = Some(90.0);
+        args.strike_max = Some(125.0);
+        args.delta_min = Some(0.2);
+        args.delta_max = Some(0.7);
+        args.min_bid = Some(1.5);
+        args.max_ask = Some(9.0);
+        args.min_volume = Some(10);
+        args.min_oi = Some(100);
+        args.max_spread_pct = Some(10.0);
+        args.min_premium = Some(7.0);
+        args.max_premium = Some(9.0);
+        args.sort = Some("bid:desc".to_string());
+        args.limit = Some(1);
+        args.fields = Some("symbol,strike,bid,ask,volume,openInterest,delta".to_string());
+
+        let output = screen_chain(&screen_chain_fixture(), &args).unwrap();
+
+        assert_eq!(output["underlying"], "AAPL");
+        assert_eq!(output["underlyingPrice"], json!("105.5"));
+        assert_eq!(output["rowCount"], 1);
+        assert_eq!(output["totalScanned"], 3);
+        assert_eq!(output["rows"][0][0], "AAPL  260116C00100000");
+        assert_eq!(output["rows"][0][1], json!("100"));
+        assert!(
+            output["filtersApplied"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|filter| filter == "sort = bid:desc")
+        );
+    }
+
+    #[test]
+    fn screen_chain_exact_strike_and_ascending_sort() {
+        let mut args = default_screen_args("AAPL");
+        args.strike = Some(95.0);
+        args.sort = Some("symbol:asc".to_string());
+        args.fields = Some("symbol,type,strike".to_string());
+
+        let output = screen_chain(&screen_chain_fixture(), &args).unwrap();
+
+        assert_eq!(output["rowCount"], 1);
+        assert_eq!(output["rows"][0][0], "AAPL  260116P00095000");
+        assert_eq!(output["rows"][0][1], "PUT");
+        assert!(
+            output["filtersApplied"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|filter| filter == "strike = 95")
+        );
+    }
+
+    #[test]
+    fn screen_chain_errors_when_chain_has_no_contracts() {
+        let args = default_screen_args("MISSING");
+        let chain = chain_from_json(json!({ "symbol": "MISSING" }));
+
+        let error = screen_chain(&chain, &args).unwrap_err();
+
+        assert_eq!(error.code(), "options.symbol_not_found");
+    }
+
+    #[test]
+    fn screen_chain_reports_invalid_numeric_filter() {
+        let mut args = default_screen_args("AAPL");
+        args.min_bid = Some(f64::NAN);
+
+        let error = screen_chain(&screen_chain_fixture(), &args).unwrap_err();
+
+        assert_eq!(error.code(), "options.validation_failed");
+        assert!(error.to_string().contains("NaN") || error.to_string().contains("number"));
+    }
+
+    #[test]
+    fn underlying_price_falls_back_to_last_then_mark_then_null() {
+        let last = chain_from_json(json!({
+            "symbol": "AAPL",
+            "underlying": { "last": 101.25, "mark": 101.0 }
+        }));
+        let mark = chain_from_json(json!({
+            "symbol": "AAPL",
+            "underlying": { "mark": 99.75 }
+        }));
+        let none = chain_from_json(json!({ "symbol": "AAPL" }));
+
+        assert_eq!(underlying_price(&last), json!("101.25"));
+        assert_eq!(underlying_price(&mark), json!("99.75"));
+        assert_eq!(underlying_price(&none), Value::Null);
+    }
+
+    #[test]
+    fn sort_value_supports_all_screen_field_aliases() {
+        let contract = flatten_chain(&screen_chain_fixture())
+            .into_iter()
+            .find(|contract| contract.contract_type == "CALL")
+            .unwrap();
+
+        for field in ALL_FIELDS.keys() {
+            let _ = sort_value(&contract, field);
+        }
     }
 }

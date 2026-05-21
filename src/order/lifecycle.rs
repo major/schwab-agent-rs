@@ -472,7 +472,8 @@ mod tests {
 
     use super::{
         ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
-        render_order_discovery_response, repeat_mode_places_order, repeat_order_builder,
+        parse_range_instant, render_order_discovery_response, repeat_mode_places_order,
+        repeat_order_builder,
     };
     use crate::cli::{Cli, Command, OrderCommand};
     use crate::order::workflow;
@@ -765,6 +766,78 @@ mod tests {
         let output = render_order_discovery_response(payload.clone(), false, Some("IBM")).unwrap();
 
         assert_eq!(output, payload);
+    }
+
+    #[test]
+    fn render_order_discovery_include_inactive_keeps_all_statuses() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                { "orderId": 1, "status": "WORKING" },
+                { "orderId": 2, "status": "FILLED" },
+                { "orderId": 3, "status": "CANCELED" }
+            ]),
+            true,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 3);
+        assert_eq!(output["include_inactive"], true);
+    }
+
+    #[test]
+    fn render_order_discovery_finds_symbol_in_nested_child_orders() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                {
+                    "orderId": 1,
+                    "status": "WORKING",
+                    "childOrderStrategies": [{
+                        "orderLegCollection": [{
+                            "instrument": { "symbol": "TSLA" }
+                        }]
+                    }]
+                },
+                {
+                    "orderId": 2,
+                    "status": "WORKING",
+                    "childOrderStrategies": [{
+                        "orderLegCollection": [{
+                            "instrument": { "symbol": "MSFT" }
+                        }]
+                    }]
+                }
+            ]),
+            false,
+            Some("tsla"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["orders"][0]["orderId"], 1);
+    }
+
+    #[test]
+    fn render_order_discovery_ignores_malformed_order_leg_collections() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                {
+                    "orderId": 1,
+                    "status": "WORKING",
+                    "orderLegCollection": { "instrument": { "symbol": "IBM" } }
+                },
+                {
+                    "orderId": 2,
+                    "status": "WORKING",
+                    "orderLegCollection": [{ "instrument": { "cusip": "NO-SYMBOL" } }]
+                }
+            ]),
+            false,
+            Some("IBM"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 0);
     }
 
     #[test]
@@ -1126,5 +1199,50 @@ mod tests {
 
         let error = normalize_get_range(&args, now).unwrap_err();
         assert!(error.to_string().contains("--from must be before"));
+    }
+
+    #[test]
+    fn normalize_get_range_defaults_to_last_sixty_days() {
+        let now = OffsetDateTime::parse(
+            "2026-06-15T12:00:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        let args = OrderGetArgs {
+            account: None,
+            order_id: None,
+            from: None,
+            to: None,
+            symbol: None,
+            recent: false,
+            include_inactive: false,
+        };
+
+        let (from, to) = normalize_get_range(&args, now).unwrap();
+
+        assert_eq!(
+            from,
+            (now - Duration::days(60))
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap()
+        );
+        assert_eq!(
+            to,
+            now.format(&time::format_description::well_known::Rfc3339)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn parse_range_instant_rejects_invalid_date_and_timestamp() {
+        let date_error = parse_range_instant("2026-02-30", super::RangeBoundary::Start)
+            .unwrap_err()
+            .to_string();
+        let timestamp_error = parse_range_instant("not-a-date", super::RangeBoundary::End)
+            .unwrap_err()
+            .to_string();
+
+        assert!(date_error.contains("invalid order get date"));
+        assert!(timestamp_error.contains("invalid order get date/time"));
     }
 }
