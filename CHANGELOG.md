@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-05-21
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Filter order lookup by symbol
+
+
 ## [0.4.3] - 2026-05-20
 
 ### <!-- 3 -->⚡ Performance
