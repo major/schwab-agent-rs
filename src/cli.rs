@@ -709,6 +709,12 @@ mod tests {
     }
 
     #[test]
+    fn command_name_auth_login() {
+        let cli = Cli::parse_from(["schwab-agent", "auth", "login"]);
+        assert_eq!(cli.command_name(), "auth.login");
+    }
+
+    #[test]
     fn command_name_analyze() {
         let cli = Cli::parse_from(["schwab-agent", "analyze", "AAPL"]);
         assert_eq!(cli.command_name(), "analyze");
@@ -1086,6 +1092,8 @@ mod tests {
     #[test]
     fn parse_order_equity_buy_dry_run() {
         let cli = Cli::parse_from(["schwab-agent", "order", "equity", "buy", "AAPL", "-q", "10"]);
+
+        assert_eq!(cli.command_name(), "order");
 
         let Command::Order(OrderCommand::Equity(super::EquityArgs::Buy(args))) = cli.command else {
             panic!("expected order equity buy command");

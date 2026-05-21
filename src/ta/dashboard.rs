@@ -802,6 +802,78 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_aligns_multi_value_indicator_series() {
+        let timestamps = [10, 20, 30, 40, 50];
+        let macd = MacdSeries {
+            macd: vec![1.111, 2.222, 3.333],
+            signal: vec![0.111, 0.222, 0.333],
+            histogram: vec![1.0, 2.0, 3.0],
+        };
+        let bbands = BbandsSeries {
+            upper: vec![11.111, 12.222, 13.333],
+            middle: vec![10.111, 10.222, 10.333],
+            lower: vec![9.111, 8.222, 7.333],
+        };
+        let stoch = StochSeries {
+            k: vec![80.111, 70.222, 60.333],
+            d: vec![75.111, 65.222, 55.333],
+        };
+        let adx = AdxSeries {
+            adx: vec![20.111, 25.222, 30.333],
+            plus_di: vec![21.111, 26.222, 31.333],
+            minus_di: vec![19.111, 24.222, 29.333],
+        };
+
+        let macd_points = align_macd_points(&macd, &timestamps, 2).unwrap();
+        let bbands_points = align_bbands_points(&bbands, &timestamps, 2).unwrap();
+        let stoch_points = align_stoch_points(&stoch, &timestamps, 2).unwrap();
+        let adx_points = align_adx_points(&adx, &timestamps, 2).unwrap();
+
+        assert_eq!(macd_points[0].timestamp, 40);
+        assert_close(macd_points[0].macd, 2.22);
+        assert_close(macd_points[1].histogram, 3.0);
+        assert_eq!(bbands_points[0].timestamp, 40);
+        assert_close(bbands_points[0].upper, 12.22);
+        assert_close(bbands_points[1].lower, 7.33);
+        assert_eq!(stoch_points[0].timestamp, 40);
+        assert_close(stoch_points[0].k, 70.22);
+        assert_close(stoch_points[1].d, 55.33);
+        assert_eq!(adx_points[0].timestamp, 40);
+        assert_close(adx_points[0].plus_di, 26.22);
+        assert_close(adx_points[1].minus_di, 29.33);
+    }
+
+    #[test]
+    fn dashboard_alignment_reports_empty_or_overlong_series() {
+        let empty = align_simple_points(&[], &[10, 20], 1, "empty").unwrap_err();
+        let overlong = align_simple_points(&[1.0, 2.0, 3.0], &[10, 20], 1, "overlong").unwrap_err();
+
+        assert!(matches!(empty, AppError::TaInsufficientData { .. }));
+        assert!(matches!(overlong, AppError::TaCalculationError { .. }));
+    }
+
+    #[test]
+    fn dashboard_helpers_report_insufficient_data_and_zero_denominators() {
+        assert!(matches!(
+            latest(&[], "close"),
+            Err(AppError::TaInsufficientData { .. })
+        ));
+        assert!(matches!(
+            last_window(&[1.0, 2.0], 3, "window"),
+            Err(AppError::TaInsufficientData { .. })
+        ));
+        assert!(matches!(
+            last_window(&[1.0, 2.0], 0, "window"),
+            Err(AppError::TaInsufficientData { needed: 1, .. })
+        ));
+        assert!(matches!(
+            percentage(1.0, 0.0, "pct"),
+            Err(AppError::TaCalculationError { .. })
+        ));
+        assert_eq!(relative_volume(1000.0, 0.0), None);
+    }
+
+    #[test]
     fn dashboard_output_assembly_populates_category_grouped_fields() {
         let args = dashboard_args(5);
         let ohlcv = mock_ohlcv(260);

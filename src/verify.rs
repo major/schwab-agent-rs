@@ -390,4 +390,20 @@ mod tests {
         ));
         assert!(result.verification_failures.is_empty());
     }
+
+    #[test]
+    fn cancel_verification_requires_status_field() {
+        let result =
+            result_from_verified_order(12345, "cancel", None, None, json!({"orderId": 12345}));
+
+        assert!(matches!(
+            result.verification_state,
+            VerificationState::Unverified
+        ));
+        assert_eq!(
+            result.verification_failures,
+            vec!["cancel not confirmed: verified order did not include a status"]
+        );
+        assert_eq!(result.verified_order.unwrap()["orderId"], 12345);
+    }
 }

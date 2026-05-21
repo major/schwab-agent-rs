@@ -387,6 +387,19 @@ mod tests {
         }))
     }
 
+    fn contract_from_json(value: serde_json::Value) -> schwab::OptionContract {
+        option_chain_from_json(json!({
+            "callExpDateMap": { "2026-06-19:35": { "100.0": [value] } }
+        }))
+        .call_exp_date_map
+        .expect("call map should exist")
+        .remove("2026-06-19:35")
+        .expect("expiration should exist")
+        .remove("100.0")
+        .expect("strike should exist")
+        .remove(0)
+    }
+
     #[test]
     fn compute_expected_move_uses_raw_straddle_for_range_math() {
         let calc = compute_expected_move(100.0, 3.50, 3.20, 30)
@@ -397,6 +410,119 @@ mod tests {
         assert_close(calc.expected_move_percent, 6.70);
         assert_close(calc.upper_range, 106.70);
         assert_close(calc.lower_range, 93.30);
+    }
+
+    #[test]
+    fn compute_expected_move_rejects_invalid_inputs() {
+        assert!(matches!(
+            compute_expected_move(0.0, 1.0, 1.0, 30),
+            Err(AppError::TaCalculationError { .. })
+        ));
+        assert!(matches!(
+            compute_expected_move(100.0, -1.0, 1.0, 30),
+            Err(AppError::TaCalculationError { .. })
+        ));
+        assert!(matches!(
+            compute_expected_move(100.0, 1.0, -1.0, 30),
+            Err(AppError::TaCalculationError { .. })
+        ));
+        assert!(matches!(
+            compute_expected_move(100.0, 0.0, 0.0, 30),
+            Err(AppError::TaCalculationError { .. })
+        ));
+    }
+
+    #[test]
+    fn render_expected_move_serializes_selected_contracts() {
+        let chain = sample_chain();
+        let args = ExpectedMoveArgs {
+            symbol: "XYZ".to_string(),
+            dte: 30,
+        };
+
+        let value = render_expected_move(&chain, &args).expect("expected move should render");
+
+        assert_eq!(value["symbol"], "XYZ");
+        assert_eq!(value["expiration"], "2026-06-19");
+        assert_eq!(value["dte"], 35);
+        assert_close(value["call_price"].as_f64().unwrap(), 3.5);
+        assert_close(value["put_price"].as_f64().unwrap(), 3.2);
+        assert_close(value["implied_volatility"].as_f64().unwrap(), 23.5);
+    }
+
+    #[test]
+    fn chain_underlying_price_falls_back_to_last_then_chain_price() {
+        let last_chain = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "underlyingPrice": 99.0,
+            "underlying": { "mark": 0.0, "last": 100.5 }
+        }));
+        let chain_price = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "underlyingPrice": 99.0,
+            "underlying": { "mark": 0.0, "last": 0.0 }
+        }));
+
+        assert_close(chain_underlying_price(&last_chain, "XYZ").unwrap(), 100.5);
+        assert_close(chain_underlying_price(&chain_price, "XYZ").unwrap(), 99.0);
+    }
+
+    #[test]
+    fn chain_underlying_price_requires_positive_price() {
+        let chain = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "underlyingPrice": 0.0,
+            "underlying": { "mark": 0.0, "last": 0.0 }
+        }));
+
+        let error = chain_underlying_price(&chain, "XYZ").unwrap_err();
+
+        assert!(matches!(error, AppError::TaInsufficientData { .. }));
+    }
+
+    #[test]
+    fn find_expiration_selects_nearest_common_expiration_with_key_tiebreak() {
+        let chain = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "callExpDateMap": {
+                "bad-key": {},
+                "2026-06-19:25": {},
+                "2026-07-17:35": {},
+                "2026-08-21:60": {}
+            },
+            "putExpDateMap": {
+                "2026-06-19:25": {},
+                "2026-07-17:35": {},
+                "2026-09-18:90": {}
+            }
+        }));
+
+        let expiration = find_expiration(&chain, 30, "XYZ").expect("expiration should match");
+
+        assert_eq!(expiration.key, "2026-06-19:25");
+        assert_eq!(expiration.date, "2026-06-19");
+        assert_eq!(expiration.dte, 25);
+    }
+
+    #[test]
+    fn find_expiration_reports_missing_call_or_put_maps() {
+        let no_calls = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "putExpDateMap": { "2026-06-19:35": {} }
+        }));
+        let no_puts = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "callExpDateMap": { "2026-06-19:35": {} }
+        }));
+
+        assert!(matches!(
+            find_expiration(&no_calls, 30, "XYZ"),
+            Err(AppError::TaInsufficientData { .. })
+        ));
+        assert!(matches!(
+            find_expiration(&no_puts, 30, "XYZ"),
+            Err(AppError::TaInsufficientData { .. })
+        ));
     }
 
     #[test]
@@ -413,17 +539,57 @@ mod tests {
     }
 
     #[test]
+    fn find_atm_contracts_ties_to_lower_strike_and_skips_bad_strikes() {
+        let chain = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "callExpDateMap": {
+                "2026-06-19:35": {
+                    "bad": [{ "markPrice": 1.0 }],
+                    "95.0": [{ "markPrice": 2.0 }],
+                    "105.0": [{ "markPrice": 3.0 }]
+                }
+            },
+            "putExpDateMap": {
+                "2026-06-19:35": {
+                    "bad": [{ "markPrice": 1.0 }],
+                    "95.0": [{ "markPrice": 2.5 }],
+                    "105.0": [{ "markPrice": 3.5 }]
+                }
+            }
+        }));
+
+        let selection = find_atm_contracts(&chain, "2026-06-19:35", 100.0).unwrap();
+
+        assert_close(selection._call_strike, 95.0);
+        assert_close(selection.call_price, 2.0);
+        assert_close(selection.put_price, 2.5);
+    }
+
+    #[test]
+    fn find_atm_contracts_reports_missing_strike_maps_and_empty_contracts() {
+        let missing_puts = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "callExpDateMap": { "2026-06-19:35": { "100.0": [{ "markPrice": 1.0 }] } }
+        }));
+        let empty_call = option_chain_from_json(json!({
+            "symbol": "XYZ",
+            "callExpDateMap": { "2026-06-19:35": { "100.0": [] } },
+            "putExpDateMap": { "2026-06-19:35": { "100.0": [{ "markPrice": 1.0 }] } }
+        }));
+
+        assert!(matches!(
+            find_atm_contracts(&missing_puts, "2026-06-19:35", 100.0),
+            Err(AppError::TaInsufficientData { .. })
+        ));
+        assert!(matches!(
+            find_atm_contracts(&empty_call, "2026-06-19:35", 100.0),
+            Err(AppError::TaInsufficientData { .. })
+        ));
+    }
+
+    #[test]
     fn contract_price_uses_midpoint_when_mark_price_is_unavailable() {
-        let contract = option_chain_from_json(json!({
-            "callExpDateMap": { "2026-06-19:35": { "100.0": [{ "bidPrice": 2.0, "askPrice": 3.0 }] } }
-        }))
-        .call_exp_date_map
-        .expect("call map should exist")
-        .remove("2026-06-19:35")
-        .expect("expiration should exist")
-        .remove("100.0")
-        .expect("strike should exist")
-        .remove(0);
+        let contract = contract_from_json(json!({ "bidPrice": 2.0, "askPrice": 3.0 }));
 
         let price = contract_price(&contract, "call", "XYZ", "100.0")
             .expect("bid/ask midpoint should price contract");
@@ -433,16 +599,11 @@ mod tests {
 
     #[test]
     fn contract_price_rejects_zero_pricing() {
-        let contract = option_chain_from_json(json!({
-            "callExpDateMap": { "2026-06-19:35": { "100.0": [{ "markPrice": 0.0, "bidPrice": 0.0, "askPrice": 0.0 }] } }
-        }))
-        .call_exp_date_map
-        .expect("call map should exist")
-        .remove("2026-06-19:35")
-        .expect("expiration should exist")
-        .remove("100.0")
-        .expect("strike should exist")
-        .remove(0);
+        let contract = contract_from_json(json!({
+            "markPrice": 0.0,
+            "bidPrice": 0.0,
+            "askPrice": 0.0
+        }));
 
         let error = contract_price(&contract, "call", "XYZ", "100.0")
             .expect_err("zero pricing should fail");
@@ -451,5 +612,24 @@ mod tests {
             error,
             AppError::TaCalculationError { indicator, .. } if indicator == "expected-move"
         ));
+    }
+
+    #[test]
+    fn average_implied_volatility_ignores_missing_or_non_positive_values() {
+        let call = contract_from_json(json!({ "volatility": 20.0 }));
+        let put = contract_from_json(json!({ "volatility": 0.0 }));
+        let empty = contract_from_json(json!({}));
+
+        assert_close(average_implied_volatility(&call, &put).unwrap(), 20.0);
+        assert_eq!(average_implied_volatility(&empty, &put), None);
+    }
+
+    #[test]
+    fn parse_expiration_key_rejects_invalid_shapes() {
+        assert!(parse_expiration_key("2026-06-19:35").is_some());
+        assert!(parse_expiration_key("2026-06-19").is_none());
+        assert!(parse_expiration_key(":35").is_none());
+        assert!(parse_expiration_key("2026-06-19:bad").is_none());
+        assert!(parse_expiration_key("2026:06-19:35").is_none());
     }
 }
