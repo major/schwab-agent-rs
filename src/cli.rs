@@ -488,9 +488,9 @@ pub enum OrderCommand {
     /// Option order: buy-to-open, sell-to-open, buy-to-close, sell-to-close (OCC symbol required).
     #[command(subcommand)]
     Option(OptionArgs),
-    /// Get active orders or one exact order.
+    /// Get active orders, symbol-filtered orders, or one exact order.
     #[command(
-        after_help = "LLM selection guide:\n  schwab-agent order get\n      Get all active/open orders across every linked account. Use this first when you need current open orders and do not already know the account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME\n      Get all active/open orders for one account. Use this when you already know which account to inspect.\n\n  schwab-agent order get --include-inactive\n      Get active plus inactive orders across every linked account. Any returned status not listed in the active_statuses output field is treated as inactive. Add --account to limit this to one account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME --order ORDER_ID\n      Get one exact order. Use this only when both the account and order ID are known. Do not combine --order with discovery filters such as --recent, --from, --to, or --include-inactive.\n\nActive statuses are exact strings returned in the active_statuses output field."
+        after_help = "LLM selection guide:\n  schwab-agent order get\n      Get all active/open orders across every linked account. Use this first when you need current open orders and do not already know the account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME\n      Get all active/open orders for one account. Use this when you already know which account to inspect.\n\n  schwab-agent order get --symbol IBM\n      Get active/open orders whose orderLegCollection includes an IBM instrument symbol. Matching is case-insensitive and includes multi-leg orders when any leg matches. Add --account to limit this to one account.\n\n  schwab-agent order get --include-inactive\n      Get active plus inactive orders across every linked account. Any returned status not listed in the active_statuses output field is treated as inactive. Add --account to limit this to one account.\n\n  schwab-agent order get --account HASH_OR_NICKNAME --order ORDER_ID\n      Get one exact order. Use this only when both the account and order ID are known. Do not combine --order with discovery filters such as --recent, --from, --to, --symbol, or --include-inactive.\n\nActive statuses are exact strings returned in the active_statuses output field."
     )]
     Get(crate::order::lifecycle::OrderGetArgs),
     /// Cancel an order by ID.
@@ -682,6 +682,8 @@ mod tests {
         assert_eq!(help.matches("LLM selection guide:").count(), 1);
         assert!(help.contains("active_statuses output field"));
         assert!(help.contains("discovery filters"));
+        assert!(help.contains("--symbol IBM"));
+        assert!(help.contains("Matching is case-insensitive"));
     }
 
     #[test]

@@ -47,9 +47,10 @@ const ACTIVE_ORDER_STATUSES: &[&str] = &[
 /// Discovery mode fetches Schwab's order list without a status filter and then
 /// treats any returned status outside `ACTIVE_ORDER_STATUSES` as inactive. By
 /// default, it searches active orders entered in the last 60 days. Use
-/// `--include-inactive` to keep filled, canceled, rejected, replaced, expired,
-/// and any other non-active statuses. Use `--recent` for the last 24 hours, or
-/// `--from`/`--to` for a custom range.
+/// `--symbol` to keep only orders whose legs include a matching instrument
+/// symbol. Use `--include-inactive` to keep filled, canceled, rejected,
+/// replaced, expired, and any other non-active statuses. Use `--recent` for the
+/// last 24 hours, or `--from`/`--to` for a custom range.
 #[derive(Debug, Args)]
 pub struct OrderGetArgs {
     /// Account hash or nickname. Omit to query active orders across all accounts.
@@ -69,6 +70,10 @@ pub struct OrderGetArgs {
     /// Defaults to now.
     #[arg(long, conflicts_with = "order_id")]
     pub to: Option<String>,
+
+    /// Keep only orders with at least one leg for this instrument symbol.
+    #[arg(long, conflicts_with = "order_id")]
+    pub symbol: Option<String>,
 
     /// Get active orders from the last 24 hours. Overrides `--from`.
     #[arg(long, conflicts_with = "order_id")]
@@ -221,7 +226,7 @@ async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Va
     let raw_orders = raw::fetch_order_list(bearer_token, account_hash.as_deref(), &query).await?;
     let normalized = raw::normalize_order_list_response(raw_orders);
 
-    render_order_discovery_response(normalized, args.include_inactive)
+    render_order_discovery_response(normalized, args.include_inactive, args.symbol.as_deref())
 }
 
 /// Renders discovery-mode order list output from a normalized Schwab response.
@@ -232,6 +237,7 @@ async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Va
 fn render_order_discovery_response(
     normalized: Value,
     include_inactive: bool,
+    symbol: Option<&str>,
 ) -> Result<Value, AppError> {
     let Value::Array(mut orders) = normalized else {
         return Ok(raw::sanitize_order(normalized));
@@ -239,6 +245,10 @@ fn render_order_discovery_response(
 
     if !include_inactive {
         orders.retain(is_active_order);
+    }
+
+    if let Some(symbol) = symbol {
+        orders.retain(|order| order_matches_symbol(order, symbol));
     }
 
     let order_value = raw::sanitize_order(Value::Array(orders));
@@ -266,6 +276,37 @@ fn is_active_order(order: &Value) -> bool {
         .get("status")
         .and_then(Value::as_str)
         .is_some_and(|status| ACTIVE_ORDER_STATUSES.contains(&status))
+}
+
+/// Returns whether any order leg instrument symbol matches the requested symbol.
+#[must_use]
+fn order_matches_symbol(order: &Value, symbol: &str) -> bool {
+    match order {
+        Value::Object(fields) => fields.iter().any(|(key, value)| {
+            if key == "orderLegCollection" {
+                order_leg_collection_matches_symbol(value, symbol)
+            } else {
+                order_matches_symbol(value, symbol)
+            }
+        }),
+        Value::Array(values) => values
+            .iter()
+            .any(|value| order_matches_symbol(value, symbol)),
+        _ => false,
+    }
+}
+
+/// Returns whether an `orderLegCollection` array includes the requested symbol.
+#[must_use]
+fn order_leg_collection_matches_symbol(order_legs: &Value, symbol: &str) -> bool {
+    order_legs.as_array().is_some_and(|legs| {
+        legs.iter().any(|leg| {
+            leg.get("instrument")
+                .and_then(|instrument| instrument.get("symbol"))
+                .and_then(Value::as_str)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(symbol))
+        })
+    })
 }
 
 /// Cancels an order and verifies the cancellation via a follow-up GET.
@@ -446,6 +487,7 @@ mod tests {
         assert!(args.order_id.is_none());
         assert!(args.from.is_none());
         assert!(args.to.is_none());
+        assert!(args.symbol.is_none());
         assert!(!args.recent);
         assert!(!args.include_inactive);
     }
@@ -475,6 +517,15 @@ mod tests {
         };
         assert_eq!(args.account.as_deref(), Some("HASH123"));
         assert!(args.recent);
+    }
+
+    #[test]
+    fn parse_order_get_with_symbol() {
+        let cli = Cli::parse_from(["schwab-agent", "order", "get", "--symbol", "IBM"]);
+        let Command::Order(OrderCommand::Get(args)) = cli.command else {
+            panic!("expected order get command");
+        };
+        assert_eq!(args.symbol.as_deref(), Some("IBM"));
     }
 
     #[test]
@@ -557,6 +608,20 @@ mod tests {
             ])
             .is_err()
         );
+        assert!(
+            Cli::try_parse_from([
+                "schwab-agent",
+                "order",
+                "get",
+                "--account",
+                "HASH123",
+                "--order",
+                "12345",
+                "--symbol",
+                "IBM"
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -604,6 +669,7 @@ mod tests {
                 { "orderId": 3 }
             ]),
             false,
+            None,
         )
         .unwrap();
 
@@ -613,13 +679,90 @@ mod tests {
     }
 
     #[test]
+    fn render_order_discovery_filters_by_symbol_case_insensitive() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                {
+                    "orderId": 1,
+                    "status": "WORKING",
+                    "orderLegCollection": [{
+                        "instruction": "SELL",
+                        "instrument": { "symbol": "IBM" }
+                    }]
+                },
+                {
+                    "orderId": 2,
+                    "status": "WORKING",
+                    "orderLegCollection": [{
+                        "instruction": "SELL",
+                        "instrument": { "symbol": "AAPL" }
+                    }]
+                }
+            ]),
+            false,
+            Some("ibm"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["orders"][0]["orderId"], 1);
+        assert_eq!(
+            output["orders"][0]["orderLegCollection"][0]["instrument"]["symbol"],
+            "IBM"
+        );
+    }
+
+    #[test]
+    fn render_order_discovery_keeps_multi_leg_symbol_match() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                {
+                    "orderId": 1,
+                    "status": "WORKING",
+                    "orderLegCollection": [
+                        { "instrument": { "symbol": "MSFT" } },
+                        { "instrument": { "symbol": "IBM" } }
+                    ]
+                }
+            ]),
+            false,
+            Some("IBM"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["orders"][0]["orderId"], 1);
+    }
+
+    #[test]
+    fn render_order_discovery_returns_empty_for_symbol_without_matches() {
+        let output = render_order_discovery_response(
+            serde_json::json!([
+                {
+                    "orderId": 1,
+                    "status": "WORKING",
+                    "orderLegCollection": [{ "instrument": { "symbol": "AAPL" } }]
+                }
+            ]),
+            false,
+            Some("IBM"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 0);
+        assert_eq!(output["orders"].as_array().unwrap().len(), 0);
+        assert_eq!(output["include_inactive"], false);
+        assert!(output.get("active_statuses").is_some());
+    }
+
+    #[test]
     fn render_order_discovery_preserves_non_array_payload() {
         let payload = serde_json::json!({
             "error": "unexpected shape",
             "status": "SOME_ENVELOPE_STATUS"
         });
 
-        let output = render_order_discovery_response(payload.clone(), false).unwrap();
+        let output = render_order_discovery_response(payload.clone(), false, Some("IBM")).unwrap();
 
         assert_eq!(output, payload);
     }
@@ -898,6 +1041,7 @@ mod tests {
             order_id: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31".to_string()),
+            symbol: None,
             recent: false,
             include_inactive: false,
         };
@@ -920,6 +1064,7 @@ mod tests {
             order_id: None,
             from: Some("2026-05-28".to_string()),
             to: Some("2026-05-31T12:30:00Z".to_string()),
+            symbol: None,
             recent: false,
             include_inactive: false,
         };
@@ -942,6 +1087,7 @@ mod tests {
             order_id: None,
             from: Some("2026-05-28".to_string()),
             to: None,
+            symbol: None,
             recent: true,
             include_inactive: false,
         };
@@ -973,6 +1119,7 @@ mod tests {
             order_id: None,
             from: Some("2026-06-01".to_string()),
             to: Some("2026-05-31".to_string()),
+            symbol: None,
             recent: false,
             include_inactive: false,
         };
