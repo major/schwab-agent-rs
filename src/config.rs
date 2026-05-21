@@ -54,10 +54,20 @@ pub(crate) struct AgentConfig {
 /// `~/.config/schwab-agent/config.json` on platforms without `XDG_CONFIG_HOME`.
 #[must_use]
 fn config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from(".config"))
+    xdg_config_home()
+        .unwrap_or_else(|| dirs::config_dir().unwrap_or_else(|| PathBuf::from(".config")))
         .join("schwab-agent")
         .join("config.json")
+}
+
+/// Returns `$XDG_CONFIG_HOME` as a [`PathBuf`] when the env var is set to a
+/// non-empty value, regardless of platform. This lets tests inject a temp dir
+/// on macOS where [`dirs::config_dir`] would otherwise resolve to
+/// `~/Library/Application Support` and ignore `XDG_CONFIG_HOME`.
+fn xdg_config_home() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Returns the default OAuth token path.
