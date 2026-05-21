@@ -206,10 +206,15 @@ fn preview_output(
     digest: Option<String>,
     warnings: Vec<crate::raw::PreviewWarning>,
 ) -> Result<Value, AppError> {
+    let summary = preview_summary(&order);
     let mut data = json!({
         "order": order,
         "preview": "accepted",
     });
+
+    if let Some(summary) = summary {
+        data["summary"] = Value::String(summary);
+    }
 
     if let Some(digest) = digest {
         data["digest"] = Value::String(digest);
@@ -221,6 +226,224 @@ fn preview_output(
     }
 
     Ok(data)
+}
+
+/// Builds a human-readable preview summary for Schwab order JSON.
+fn preview_summary(order: &Value) -> Option<String> {
+    let mut lines = Vec::new();
+    summarize_order(order, "Order", None, &mut lines);
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(format!("Preview accepted:\n  {}", lines.join("\n  ")))
+    }
+}
+
+fn summarize_order(order: &Value, label: &str, relation: Option<&str>, lines: &mut Vec<String>) {
+    let strategy = string_field(order, "orderStrategyType")
+        .unwrap_or("SINGLE")
+        .to_ascii_uppercase();
+
+    if strategy == "OCO" {
+        summarize_oco(order, label, relation, lines);
+        return;
+    }
+
+    if let Some(legs) = leg_summaries(order) {
+        let leg_label = if strategy == "TRIGGER" && label == "Order" {
+            "Parent"
+        } else {
+            label
+        };
+        lines.push(format_summary_line(leg_label, &legs, relation));
+    }
+
+    let child_relation = if strategy == "TRIGGER" {
+        Some("activates on parent fill")
+    } else {
+        relation
+    };
+
+    if let Some(children) = child_orders(order) {
+        for (index, child) in children.iter().enumerate() {
+            let child_label = format!("Child {}", index + 1);
+            summarize_order(child, &child_label, child_relation, lines);
+        }
+    }
+}
+
+fn summarize_oco(order: &Value, label: &str, relation: Option<&str>, lines: &mut Vec<String>) {
+    if let Some(children) = child_orders(order) {
+        for (index, child) in children.iter().enumerate() {
+            let branch_label = if label == "Order" || label.starts_with("Child ") {
+                format!("OCO branch {}", index + 1)
+            } else {
+                format!("{label} / OCO branch {}", index + 1)
+            };
+            let branch_relation = combine_relations(relation, "one-cancels-other branch");
+            summarize_order(child, &branch_label, branch_relation.as_deref(), lines);
+        }
+        return;
+    }
+
+    if let Some(legs) = leg_summaries(order) {
+        let branch_relation = combine_relations(relation, "one-cancels-other branch");
+        lines.push(format_summary_line(
+            label,
+            &legs,
+            branch_relation.as_deref(),
+        ));
+    }
+}
+
+fn leg_summaries(order: &Value) -> Option<String> {
+    let legs = order
+        .get("orderLegCollection")
+        .and_then(Value::as_array)?
+        .iter()
+        .map(|leg| leg_summary(order, leg))
+        .collect::<Vec<_>>();
+
+    if legs.is_empty() {
+        None
+    } else {
+        Some(legs.join(" + "))
+    }
+}
+
+fn leg_summary(order: &Value, leg: &Value) -> String {
+    let instruction = string_field(leg, "instruction").unwrap_or("UNKNOWN");
+    let quantity = number_field(leg, "quantity").unwrap_or_else(|| "?".to_string());
+    let symbol = leg
+        .get("instrument")
+        .and_then(|instrument| string_field(instrument, "symbol"))
+        .map(render_symbol)
+        .unwrap_or_else(|| "UNKNOWN".to_string());
+    let order_type = string_field(order, "orderType").unwrap_or("UNKNOWN");
+    let duration = string_field(order, "duration").unwrap_or("UNKNOWN");
+    let price = price_summary(order, order_type);
+
+    format!("{instruction} {quantity} {symbol} {order_type}{price} {duration}")
+}
+
+fn price_summary(order: &Value, order_type: &str) -> String {
+    match order_type {
+        "LIMIT" => money_field(order, "price")
+            .map(|price| format!(" @ {price}"))
+            .unwrap_or_default(),
+        "STOP" => money_field(order, "stopPrice")
+            .map(|price| format!(" @ {price}"))
+            .unwrap_or_default(),
+        "STOP_LIMIT" => match (money_field(order, "price"), money_field(order, "stopPrice")) {
+            (Some(price), Some(stop)) => format!(" @ {price} stop {stop}"),
+            (Some(price), None) => format!(" @ {price}"),
+            (None, Some(stop)) => format!(" stop {stop}"),
+            (None, None) => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+fn format_summary_line(label: &str, legs: &str, relation: Option<&str>) -> String {
+    match relation {
+        Some(relation) => format!("{label}: {legs} ({relation})"),
+        None => format!("{label}: {legs}"),
+    }
+}
+
+fn combine_relations(existing: Option<&str>, addition: &str) -> Option<String> {
+    match existing {
+        Some(existing) => Some(format!("{existing}, {addition}")),
+        None => Some(addition.to_string()),
+    }
+}
+
+fn child_orders(order: &Value) -> Option<&Vec<Value>> {
+    order.get("childOrderStrategies").and_then(Value::as_array)
+}
+
+fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
+}
+
+fn number_field(value: &Value, key: &str) -> Option<String> {
+    value.get(key).map(number_value)
+}
+
+fn money_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .map(|number| format!("${}", number_value(number)))
+}
+
+fn number_value(value: &Value) -> String {
+    match value {
+        Value::Number(number) => number
+            .as_f64()
+            .map(format_decimal)
+            .unwrap_or_else(|| number.to_string()),
+        Value::String(value) => value.clone(),
+        _ => "?".to_string(),
+    }
+}
+
+fn format_decimal(value: f64) -> String {
+    if (value.fract()).abs() < f64::EPSILON {
+        format!("{value:.0}")
+    } else {
+        let value = format!("{value:.4}");
+        value
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
+
+fn render_symbol(symbol: &str) -> String {
+    decode_occ_symbol(symbol).unwrap_or_else(|| symbol.to_string())
+}
+
+fn decode_occ_symbol(symbol: &str) -> Option<String> {
+    if symbol.len() != 21 {
+        return None;
+    }
+
+    let underlying = symbol.get(0..6)?.trim();
+    let date = symbol.get(6..12)?;
+    let side = symbol.get(12..13)?;
+    let strike = symbol.get(13..21)?.parse::<u64>().ok()?;
+    let month = month_name(date.get(2..4)?.parse::<u8>().ok()?)?;
+    let day = date.get(4..6)?.parse::<u8>().ok()?;
+    let option_type = match side {
+        "C" => "CALL",
+        "P" => "PUT",
+        _ => return None,
+    };
+    let strike = format_decimal(strike as f64 / 1000.0);
+
+    Some(format!(
+        "{underlying} {month}{day}'{} {strike} {option_type}",
+        date.get(0..2)?
+    ))
+}
+
+fn month_name(month: u8) -> Option<&'static str> {
+    match month {
+        1 => Some("Jan"),
+        2 => Some("Feb"),
+        3 => Some("Mar"),
+        4 => Some("Apr"),
+        5 => Some("May"),
+        6 => Some("Jun"),
+        7 => Some("Jul"),
+        8 => Some("Aug"),
+        9 => Some("Sep"),
+        10 => Some("Oct"),
+        11 => Some("Nov"),
+        12 => Some("Dec"),
+        _ => None,
+    }
 }
 
 /// Places an order from a previously saved preview digest.
@@ -501,7 +724,185 @@ mod tests {
         assert_eq!(output["order"]["orderType"], "LIMIT");
         assert!(output.get("digest").is_none());
         assert!(output.get("digest_ttl_seconds").is_none());
+        assert!(output.get("summary").is_none());
         assert!(output.get("warnings").is_none());
+    }
+
+    #[test]
+    fn preview_output_summarizes_single_equity_leg() {
+        let output = preview_output(
+            json!({
+                "orderType": "LIMIT",
+                "duration": "DAY",
+                "price": 150.25,
+                "orderLegCollection": [{
+                    "instruction": "BUY",
+                    "quantity": 10,
+                    "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                }]
+            }),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output["summary"],
+            "Preview accepted:\n  Order: BUY 10 AAPL LIMIT @ $150.25 DAY"
+        );
+    }
+
+    #[test]
+    fn preview_output_summarizes_trigger_parent_and_child() {
+        let output = preview_output(
+            json!({
+                "orderStrategyType": "TRIGGER",
+                "orderType": "LIMIT",
+                "duration": "DAY",
+                "price": 150.0,
+                "orderLegCollection": [{
+                    "instruction": "BUY",
+                    "quantity": 10,
+                    "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                }],
+                "childOrderStrategies": [{
+                    "orderStrategyType": "SINGLE",
+                    "orderType": "STOP",
+                    "duration": "GOOD_TILL_CANCEL",
+                    "stopPrice": 140.0,
+                    "orderLegCollection": [{
+                        "instruction": "SELL",
+                        "quantity": 10,
+                        "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                    }]
+                }]
+            }),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output["summary"],
+            "Preview accepted:\n  Parent: BUY 10 AAPL LIMIT @ $150 DAY\n  Child 1: SELL 10 AAPL STOP @ $140 GOOD_TILL_CANCEL (activates on parent fill)"
+        );
+    }
+
+    #[test]
+    fn preview_output_summarizes_oco_branches() {
+        let output = preview_output(
+            json!({
+                "orderStrategyType": "OCO",
+                "childOrderStrategies": [
+                    {
+                        "orderStrategyType": "SINGLE",
+                        "orderType": "LIMIT",
+                        "duration": "GOOD_TILL_CANCEL",
+                        "price": 155.0,
+                        "orderLegCollection": [{
+                            "instruction": "SELL",
+                            "quantity": 10,
+                            "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                        }]
+                    },
+                    {
+                        "orderStrategyType": "SINGLE",
+                        "orderType": "STOP",
+                        "duration": "GOOD_TILL_CANCEL",
+                        "stopPrice": 140.0,
+                        "orderLegCollection": [{
+                            "instruction": "SELL",
+                            "quantity": 10,
+                            "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                        }]
+                    }
+                ]
+            }),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output["summary"],
+            "Preview accepted:\n  OCO branch 1: SELL 10 AAPL LIMIT @ $155 GOOD_TILL_CANCEL (one-cancels-other branch)\n  OCO branch 2: SELL 10 AAPL STOP @ $140 GOOD_TILL_CANCEL (one-cancels-other branch)"
+        );
+    }
+
+    #[test]
+    fn preview_output_summarizes_trigger_parent_with_oco_children() {
+        let output = preview_output(
+            json!({
+                "orderStrategyType": "TRIGGER",
+                "orderType": "LIMIT",
+                "duration": "DAY",
+                "price": 180.0,
+                "orderLegCollection": [{
+                    "instruction": "BUY",
+                    "quantity": 100,
+                    "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                }],
+                "childOrderStrategies": [{
+                    "orderStrategyType": "OCO",
+                    "childOrderStrategies": [
+                        {
+                            "orderStrategyType": "SINGLE",
+                            "orderType": "LIMIT",
+                            "duration": "GOOD_TILL_CANCEL",
+                            "price": 200.0,
+                            "orderLegCollection": [{
+                                "instruction": "SELL",
+                                "quantity": 100,
+                                "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                            }]
+                        },
+                        {
+                            "orderStrategyType": "SINGLE",
+                            "orderType": "STOP",
+                            "duration": "GOOD_TILL_CANCEL",
+                            "stopPrice": 170.0,
+                            "orderLegCollection": [{
+                                "instruction": "SELL",
+                                "quantity": 100,
+                                "instrument": {"symbol": "AAPL", "assetType": "EQUITY"}
+                            }]
+                        }
+                    ]
+                }]
+            }),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output["summary"],
+            "Preview accepted:\n  Parent: BUY 100 AAPL LIMIT @ $180 DAY\n  OCO branch 1: SELL 100 AAPL LIMIT @ $200 GOOD_TILL_CANCEL (activates on parent fill, one-cancels-other branch)\n  OCO branch 2: SELL 100 AAPL STOP @ $170 GOOD_TILL_CANCEL (activates on parent fill, one-cancels-other branch)"
+        );
+    }
+
+    #[test]
+    fn preview_output_decodes_option_occ_symbols() {
+        let output = preview_output(
+            json!({
+                "orderType": "LIMIT",
+                "duration": "DAY",
+                "price": 5.5,
+                "orderLegCollection": [{
+                    "instruction": "BUY_TO_OPEN",
+                    "quantity": 1,
+                    "instrument": {"symbol": "AAPL  260120C00100000", "assetType": "OPTION"}
+                }]
+            }),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            output["summary"],
+            "Preview accepted:\n  Order: BUY_TO_OPEN 1 AAPL Jan20'26 100 CALL LIMIT @ $5.5 DAY"
+        );
     }
 
     #[test]

@@ -117,7 +117,7 @@ Unified order workflow for equity and option placement, lifecycle management, an
 
 **Equity actions** (`order equity`): `buy`, `sell`, `sell-short`, `buy-to-cover`. Each hardcodes the Schwab `Instruction` to prevent accidental trade reversal.
 
-**Option actions** (`order option`): `buy-to-open`, `sell-to-open`, `buy-to-close`, `sell-to-close`. Requires a full OCC symbol (e.g., `AAPL  250117C00150000`). Each hardcodes the Schwab `Instruction`. For multi-leg orders, use `order place-raw`.
+**Option actions** (`order option`): `buy-to-open`, `sell-to-open`, `buy-to-close`, `sell-to-close`. Requires a full OCC symbol (e.g., `AAPL  250117C00150000`). Each hardcodes the Schwab `Instruction`. For multi-leg orders, use `order preview-raw --save-preview` to verify the raw payload summary and digest before `order place-from-preview`, or use `order place-raw` only when direct placement is explicitly intended.
 
 The `-a`/`--account` flag controls execution mode: omit for dry-run (prints order JSON locally), pass `--account` to place directly, add `--save-preview` to preview and save a digest, or add `--preview-first` to preview then place automatically.
 
@@ -192,7 +192,7 @@ The recommended agent workflow uses tamper-evident previews:
 
 Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
-If Schwab accepts a preview with non-fatal validation warnings, the preview still saves a digest and includes a `warnings` array with sanitized message, severity, and validation rule fields. The saved digest continues to cover only the submitted order payload and preview metadata, so `place-from-preview` submits the exact order that was previewed.
+Preview responses include a `summary` string that describes each order leg in plain language with instruction, quantity, symbol, order type, price or stop price, duration, and TRIGGER/OCO relationships. Option OCC symbols are decoded in the summary when possible. If Schwab accepts a preview with non-fatal validation warnings, the preview still saves a digest and includes a `warnings` array with sanitized message, severity, and validation rule fields. The saved digest continues to cover only the submitted order payload and preview metadata, so `place-from-preview` submits the exact order that was previewed.
 
 ### Post-Action Verification
 

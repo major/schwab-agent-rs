@@ -85,7 +85,7 @@ The `-a`/`--account` flag controls execution mode:
 - `--account HASH --save-preview`: previews and saves digest
 - `--account HASH --preview-first`: previews then places automatically
 
-Non-fatal Schwab preview warnings do not block digest creation. When present, `--save-preview` and `preview-raw --save-preview` include sanitized `warnings` entries with severity, message, and validation rule fields; the saved digest still covers only the order payload and preview metadata.
+Preview responses include a human-readable `summary` string for semantic checks before placement. It lists each leg's instruction, quantity, symbol, order type, price or stop price, duration, and TRIGGER/OCO relationships, and decodes option OCC symbols when possible. Non-fatal Schwab preview warnings do not block digest creation. When present, `--save-preview` and `preview-raw --save-preview` include sanitized `warnings` entries with severity, message, and validation rule fields; the saved digest still covers only the order payload and preview metadata.
 
 Prefer limit orders when practical: pass `--price` for limit orders. Omit `--price` only when a market order is explicitly desired.
 
@@ -143,11 +143,11 @@ schwab-agent order option buy-to-close "AAPL  250117C00150000" -q 1 --price 2.00
 schwab-agent order option sell-to-close "SPY   250620P00550000" -q 1 --price 3.00 -a HASH
 ```
 
-For multi-leg orders (spreads, straddles, condors), use `order place-raw` with a raw JSON payload.
+For multi-leg orders (spreads, straddles, condors), use `order preview-raw --save-preview` to verify the raw payload summary and digest before `order place-from-preview`, or use `order place-raw` only when direct placement is explicitly intended.
 
 ### Complex Orders (Bracket, OCO, Trigger)
 
-Use `order preview-raw` and `order place-raw` to submit arbitrary JSON payloads for order types not covered by the porcelain commands. This is the path for bracket orders, OCO (one-cancels-other), and triggered orders.
+Use `order preview-raw --save-preview` and `order place-from-preview` for arbitrary JSON payloads not covered by the porcelain commands. This is the path for bracket orders, OCO (one-cancels-other), and triggered orders. Check the preview response's `summary` field before placement to confirm the parent, child, and OCO branch semantics match the intended trade.
 
 #### Bracket Order (Buy + Stop Loss + Profit Target)
 
@@ -210,7 +210,7 @@ schwab-agent order preview-raw --account HASH --save-preview --json '{
 An OCO order places two orders where filling one cancels the other. Use this when you already hold shares and want to set both a stop loss and a profit target.
 
 ```bash
-schwab-agent order place-raw --account HASH --json '{
+schwab-agent order preview-raw --account HASH --save-preview --json '{
   "orderStrategyType": "OCO",
   "childOrderStrategies": [
     {
@@ -250,7 +250,7 @@ schwab-agent order place-raw --account HASH --json '{
 A `TRIGGER` parent fires its child orders when the parent fills. Use this when you want a stop loss activated automatically after a buy.
 
 ```bash
-schwab-agent order place-raw --account HASH --json '{
+schwab-agent order preview-raw --account HASH --save-preview --json '{
   "orderType": "LIMIT",
   "session": "NORMAL",
   "duration": "DAY",

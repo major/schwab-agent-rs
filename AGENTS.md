@@ -95,7 +95,7 @@ Use `order equity ACTION` for stock orders. Each action hardcodes the Schwab `In
 
 buy-to-open, sell-to-open, buy-to-close, sell-to-close
 
-Use `order option ACTION OCC_SYMBOL` for single-leg option orders. Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. The OCC symbol must be the full 21-character format (e.g., `AAPL  250117C00150000`). For multi-leg orders, use `order place-raw` with a raw JSON payload.
+Use `order option ACTION OCC_SYMBOL` for single-leg option orders. Each action hardcodes the Schwab `Instruction` to prevent accidental trade reversal. The OCC symbol must be the full 21-character format (e.g., `AAPL  250117C00150000`). For multi-leg orders, use `order preview-raw --save-preview` to verify the raw payload summary and digest before `order place-from-preview`, or use `order place-raw` only when direct placement is explicitly intended.
 
 ### Order Workflow
 
@@ -108,7 +108,7 @@ The `-a`/`--account` flag controls execution mode:
 
 Recommended LLM workflow: pass `--save-preview` to get a digest, then `order place-from-preview --account HASH --digest DIGEST`. This submits the exact saved preview payload after the SHA-256 digest, 15-minute TTL, and account checks pass. Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
-Preview responses can include non-fatal Schwab validation warnings. `--save-preview` and `preview-raw --save-preview` keep these as sanitized `warnings` entries in the command output while still saving a usable digest. The saved preview file continues to store only the submitted order payload and metadata.
+Preview responses include a human-readable `summary` string describing each order leg with instruction, quantity, symbol, order type, price or stop price, duration, and TRIGGER/OCO relationships. Option OCC symbols are decoded in the summary when possible. Preview responses can include non-fatal Schwab validation warnings. `--save-preview` and `preview-raw --save-preview` keep these as sanitized `warnings` entries in the command output while still saving a usable digest. The saved preview file continues to store only the submitted order payload and metadata.
 
 Agents should prefer limit-style pricing whenever practical: pass `--price` so orders use `LIMIT`. Omitting `--price` intentionally creates a market order and should be reserved for cases where market execution is explicitly desired.
 
