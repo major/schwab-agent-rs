@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.5] - 2026-05-21
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Tolerate preview warnings
+
+### <!-- 6 -->🧪 Testing
+
+- Raise project coverage above threshold
+- Raise coverage above ninety percent
+
+### <!-- 7 -->⚙️ Miscellaneous
+
+- Add codecov patch coverage checks
+
+
 ## [0.4.4] - 2026-05-21
 
 ### <!-- 1 -->🐛 Bug Fixes

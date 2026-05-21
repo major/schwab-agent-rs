@@ -1,6 +1,6 @@
 [package]
 name = "schwab-agent-rs"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2024"
 rust-version = "1.95"
 description = "Agent-oriented JSON CLI porcelain for schwab-rs"
