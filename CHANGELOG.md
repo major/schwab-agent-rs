@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.6] - 2026-05-21
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Tolerate preview warnings
+
+### <!-- 7 -->⚙️ Miscellaneous
+
+- Release v0.4.5
+
+
 ## [0.4.5] - 2026-05-21
 
 ### <!-- 1 -->🐛 Bug Fixes
