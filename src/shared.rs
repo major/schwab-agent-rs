@@ -84,3 +84,55 @@ pub fn to_number(v: f64) -> Result<schwab::Number, AppError> {
     schwab::Number::from_str(&s)
         .map_err(|_| AppError::OrderValidation(format!("cannot convert {v} to decimal")))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_choice_maps_to_schwab_session() {
+        assert!(matches!(
+            schwab::Session::from(SessionChoice::Normal),
+            schwab::Session::Normal
+        ));
+        assert!(matches!(
+            schwab::Session::from(SessionChoice::Am),
+            schwab::Session::Am
+        ));
+        assert!(matches!(
+            schwab::Session::from(SessionChoice::Pm),
+            schwab::Session::Pm
+        ));
+        assert!(matches!(
+            schwab::Session::from(SessionChoice::Seamless),
+            schwab::Session::Seamless
+        ));
+    }
+
+    #[test]
+    fn duration_choice_maps_to_schwab_duration() {
+        assert!(matches!(
+            schwab::Duration::from(DurationChoice::Day),
+            schwab::Duration::Day
+        ));
+        assert!(matches!(
+            schwab::Duration::from(DurationChoice::GoodTillCancel),
+            schwab::Duration::GoodTillCancel
+        ));
+        assert!(matches!(
+            schwab::Duration::from(DurationChoice::FillOrKill),
+            schwab::Duration::FillOrKill
+        ));
+        assert!(matches!(
+            schwab::Duration::from(DurationChoice::ImmediateOrCancel),
+            schwab::Duration::ImmediateOrCancel
+        ));
+    }
+
+    #[test]
+    fn to_number_accepts_finite_value() {
+        let value = to_number(42.5).expect("finite value should convert");
+
+        assert_eq!(value.to_string(), "42.5");
+    }
+}

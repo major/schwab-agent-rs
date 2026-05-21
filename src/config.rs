@@ -312,6 +312,31 @@ mod tests {
     }
 
     #[test]
+    fn load_agent_config_missing_file_returns_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+
+        let config = load_agent_config_from(&path).expect("missing config should be safe default");
+
+        assert!(config.client_id.is_none());
+        assert!(config.client_secret.is_none());
+        assert!(config.callback_url.is_none());
+        assert!(!config.i_also_like_to_live_dangerously);
+    }
+
+    #[test]
+    fn load_agent_config_rejects_malformed_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "{not json").unwrap();
+
+        let err = load_agent_config_from(&path).unwrap_err();
+
+        assert_eq!(err.code(), "json.error");
+        assert_eq!(err.exit_code(), 20);
+    }
+
+    #[test]
     fn deserializes_credential_fields() {
         let json = r#"{
             "client_id": "my_id",
