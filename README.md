@@ -210,10 +210,11 @@ All mutable order actions (place, place-from-preview, place-raw, replace, repeat
 make check    # fmt + clippy + test + doc (runs both default and decimal feature configs)
 make test     # tests only (default + decimal)
 make coverage # cargo llvm-cov, 90% line coverage threshold
+make patch-coverage # lcov + diff-cover, 100% changed-line threshold against main
 make audit    # cargo audit
 ```
 
-CI runs on Ubuntu, macOS, and Windows with MSRV verification against 1.95.
+CI runs on Ubuntu, macOS, and Windows with MSRV verification against 1.95. The coverage job uploads `lcov.info` to Codecov. Codecov requires 90% project coverage with a 2% tolerance for the current baseline and 100% patch coverage for changed lines. Run `make patch-coverage` before opening a PR; override the comparison branch with `PATCH_COVERAGE_BASE=<branch>` or use `DIFF_COVER='uvx diff-cover'` if `diff-cover` is not installed as a standalone command.
 
 ## Release
 
