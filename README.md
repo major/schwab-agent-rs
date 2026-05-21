@@ -121,7 +121,7 @@ Unified order workflow for equity and option placement, lifecycle management, an
 
 The `-a`/`--account` flag controls execution mode: omit for dry-run (prints order JSON locally), pass `--account` to place directly, add `--save-preview` to preview and save a digest, or add `--preview-first` to preview then place automatically.
 
-Lifecycle subcommands: `get`, `cancel`, `replace`, `repeat`. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--include-inactive` to keep inactive orders, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new payload. `repeat` fetches an existing order, rebuilds a new order payload from the supported historical fields, and can place directly, save a preview digest, or preview first.
+Lifecycle subcommands: `get`, `cancel`, `replace`, `repeat`. `order get` without arguments returns active orders across all linked accounts. Pass `--account HASH_OR_NICKNAME` to return active orders for one account, `--symbol SYMBOL` to keep only orders whose legs include that instrument symbol, `--include-inactive` to keep inactive orders, or `--account HASH_OR_NICKNAME --order ORDER_ID` to fetch one specific order. `replace` requires `--account` and `--order-id`, then an `equity` or `option` subcommand with the new payload. `repeat` fetches an existing order, rebuilds a new order payload from the supported historical fields, and can place directly, save a preview digest, or preview first.
 
 ```bash
 # Equity orders
@@ -138,6 +138,7 @@ schwab-agent order place-from-preview -a HASH -d DIGEST_HEX
 # Lifecycle
 schwab-agent order get
 schwab-agent order get --account HASH_OR_NICKNAME
+schwab-agent order get --symbol IBM
 schwab-agent order get --include-inactive --from 2025-01-01 --to 2025-01-31
 schwab-agent order get --account HASH_OR_NICKNAME --order 12345678
 schwab-agent order replace -a HASH --order-id 12345678 equity buy AAPL -q 10 --price 148.00
@@ -195,9 +196,9 @@ Previews are stored in `$XDG_STATE_DIR/schwab-agent/previews/`.
 
 All mutable order actions (place, place-from-preview, place-raw, replace, repeat, cancel) automatically follow up with a GET to retrieve the order status. Schwab's API only returns a Location header and order ID on placement and replacement, so the CLI verifies by fetching the full order. The response preserves the existing `order_id`, `location`, and submitted `order` fields, and adds `verification_state`, optional `verification_failures`, and `verified_order` when the follow-up GET returns order details.
 
-`order get` defaults to cross-account active-order discovery. Active orders are returned orders whose `status` exactly matches one of the strings in the `active_statuses` output field. Any other returned status is treated as inactive and is included only with `--include-inactive`. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break discovery. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
+`order get` defaults to cross-account active-order discovery. Active orders are returned orders whose `status` exactly matches one of the strings in the `active_statuses` output field. Any other returned status is treated as inactive and is included only with `--include-inactive`. Add `--symbol SYMBOL` to keep only orders whose `orderLegCollection` includes a matching instrument symbol; matching is case-insensitive, multi-leg orders are included when any leg matches, and no matches returns a successful empty `orders` array. The command fetches raw Schwab order JSON before sanitizing output so newer order activity values such as canceled executions do not break discovery. If Schwab returns an unrecognized activity enum value, the response still includes the order and adds a sanitized `warnings` array with the field, value, and count.
 
-`order get --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`. Date filters, `--recent`, and `--include-inactive` are discovery-mode filters and cannot be combined with `--order`.
+`order get --from` and `--to` accept either date-only values (`YYYY-MM-DD`) or exact RFC3339 instants. Date-only ranges are interpreted as inclusive UTC calendar days, so `--from 2026-05-28 --to 2026-05-31` searches from `2026-05-28T00:00:00Z` through `2026-05-31T23:59:59.999999999Z`. Date filters, `--recent`, `--symbol`, and `--include-inactive` are discovery-mode filters and cannot be combined with `--order`.
 
 `order cancel` accepts the order ID either positionally (`order cancel --account HASH 12345678`) or as `--order-id 12345678`.
 
