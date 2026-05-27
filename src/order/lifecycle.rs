@@ -229,6 +229,36 @@ async fn handle_get_orders(bearer_token: &str, args: &OrderGetArgs) -> Result<Va
     render_order_discovery_response(normalized, args.include_inactive, args.symbol.as_deref())
 }
 
+/// Expands TRIGGER order children into the order list so active child stops
+/// can be surfaced alongside regular SINGLE orders.
+///
+/// Schwab one-triggers-other (OTO) orders have `orderStrategyType: "TRIGGER"`
+/// with working children inside `childOrderStrategies[]`. When the parent
+/// fills, the child stop activates (status `WORKING`) but remains nested.
+/// This function promotes those children so they can pass the active-order
+/// and symbol filters independently.
+#[must_use]
+fn expand_trigger_child_orders(orders: Vec<Value>) -> Vec<Value> {
+    let mut result = Vec::new();
+    for order in orders {
+        let is_trigger = order
+            .get("orderStrategyType")
+            .and_then(Value::as_str)
+            .is_some_and(|ty| ty.eq_ignore_ascii_case("TRIGGER"));
+
+        if is_trigger
+            && let Some(children) = order.get("childOrderStrategies").and_then(Value::as_array)
+        {
+            for child in children {
+                result.push(child.clone());
+            }
+        }
+
+        result.push(order);
+    }
+    result
+}
+
 /// Renders discovery-mode order list output from a normalized Schwab response.
 ///
 /// Non-array payloads are returned unchanged after sanitization. That preserves
@@ -242,6 +272,8 @@ fn render_order_discovery_response(
     let Value::Array(mut orders) = normalized else {
         return Ok(raw::sanitize_order(normalized));
     };
+
+    orders = expand_trigger_child_orders(orders);
 
     if !include_inactive {
         orders.retain(is_active_order);
@@ -471,9 +503,9 @@ mod tests {
     use time::{Duration, OffsetDateTime};
 
     use super::{
-        ACTIVE_ORDER_STATUSES, OrderGetArgs, is_active_order, normalize_get_range,
-        parse_range_instant, render_order_discovery_response, repeat_mode_places_order,
-        repeat_order_builder,
+        ACTIVE_ORDER_STATUSES, OrderGetArgs, expand_trigger_child_orders, is_active_order,
+        normalize_get_range, parse_range_instant, render_order_discovery_response,
+        repeat_mode_places_order, repeat_order_builder,
     };
     use crate::cli::{Cli, Command, OrderCommand};
     use crate::order::workflow;
@@ -832,6 +864,225 @@ mod tests {
                     "orderLegCollection": [{ "instrument": { "cusip": "NO-SYMBOL" } }]
                 }
             ]),
+            false,
+            Some("IBM"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 0);
+    }
+
+    // --- expand_trigger_child_orders ---
+
+    #[test]
+    fn expand_trigger_child_orders_promotes_children_before_parent() {
+        let orders = vec![serde_json::json!({
+            "orderId": 1,
+            "orderStrategyType": "TRIGGER",
+            "status": "FILLED",
+            "childOrderStrategies": [{
+                "orderType": "STOP",
+                "status": "WORKING",
+                "stopPrice": 150.00,
+                "orderLegCollection": [{
+                    "instrument": { "symbol": "XYZ" },
+                    "quantity": 100.0,
+                    "instruction": "SELL"
+                }]
+            }]
+        })];
+
+        let expanded = expand_trigger_child_orders(orders);
+
+        assert_eq!(expanded.len(), 2);
+        // Child is promoted before the parent
+        assert_eq!(expanded[0]["status"], "WORKING");
+        assert_eq!(expanded[0]["orderType"], "STOP");
+        assert_eq!(
+            expanded[0]["orderLegCollection"][0]["instrument"]["symbol"],
+            "XYZ"
+        );
+        // Parent follows
+        assert_eq!(expanded[1]["orderId"], 1);
+        assert_eq!(expanded[1]["status"], "FILLED");
+    }
+
+    #[test]
+    fn expand_trigger_child_orders_handles_multiple_children() {
+        let orders = vec![serde_json::json!({
+            "orderId": 1,
+            "orderStrategyType": "TRIGGER",
+            "status": "FILLED",
+            "childOrderStrategies": [
+                { "status": "WORKING", "orderType": "STOP", "stopPrice": 150.00 },
+                { "status": "CANCELED", "orderType": "LIMIT", "price": 145.00 }
+            ]
+        })];
+
+        let expanded = expand_trigger_child_orders(orders);
+
+        assert_eq!(expanded.len(), 3);
+        assert_eq!(expanded[0]["orderType"], "STOP");
+        assert_eq!(expanded[1]["orderType"], "LIMIT");
+        assert_eq!(expanded[2]["orderId"], 1);
+    }
+
+    #[test]
+    fn expand_trigger_child_orders_keeps_non_trigger_unchanged() {
+        let orders = vec![
+            serde_json::json!({
+                "orderId": 1,
+                "orderStrategyType": "SINGLE",
+                "status": "WORKING"
+            }),
+            serde_json::json!({
+                "orderId": 2,
+                "orderStrategyType": "OCO",
+                "status": "WORKING"
+            }),
+        ];
+
+        let expanded = expand_trigger_child_orders(orders);
+
+        assert_eq!(expanded.len(), 2);
+        assert_eq!(expanded[0]["orderId"], 1);
+        assert_eq!(expanded[1]["orderId"], 2);
+    }
+
+    #[test]
+    fn expand_trigger_child_orders_ignores_missing_child_order_strategies() {
+        let orders = vec![serde_json::json!({
+            "orderId": 1,
+            "orderStrategyType": "TRIGGER",
+            "status": "WORKING"
+        })];
+
+        let expanded = expand_trigger_child_orders(orders);
+
+        assert_eq!(expanded.len(), 1);
+        assert_eq!(expanded[0]["orderId"], 1);
+    }
+
+    #[test]
+    fn expand_trigger_child_orders_case_insensitive_strategy_type() {
+        let orders = vec![serde_json::json!({
+            "orderId": 1,
+            "orderStrategyType": "trigger",
+            "status": "FILLED",
+            "childOrderStrategies": [{
+                "status": "WORKING",
+                "orderType": "STOP"
+            }]
+        })];
+
+        let expanded = expand_trigger_child_orders(orders);
+
+        assert_eq!(expanded.len(), 2);
+        assert_eq!(expanded[0]["status"], "WORKING");
+    }
+
+    // --- trigger child end-to-end via render_order_discovery_response ---
+
+    #[test]
+    fn render_order_discovery_surfaces_filled_trigger_with_working_child() {
+        // This is the core fix: a TRIGGER order whose parent is FILLED
+        // but has a WORKING child stop should surface the child.
+        let output = render_order_discovery_response(
+            serde_json::json!([{
+                "orderId": 1,
+                "orderStrategyType": "TRIGGER",
+                "status": "FILLED",
+                "orderLegCollection": [{
+                    "instruction": "BUY",
+                    "instrument": { "symbol": "XYZ" }
+                }],
+                "childOrderStrategies": [{
+                    "status": "WORKING",
+                    "orderType": "STOP",
+                    "stopPrice": 150.00,
+                    "orderLegCollection": [{
+                        "instruction": "SELL",
+                        "instrument": { "symbol": "XYZ" }
+                    }]
+                }]
+            }]),
+            false,
+            None,
+        )
+        .unwrap();
+
+        // The WORKING child is surfaced because expand_trigger_child_orders
+        // promoted it before is_active_order filtered the FILLED parent.
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["orders"][0]["status"], "WORKING");
+        assert_eq!(output["orders"][0]["orderType"], "STOP");
+    }
+
+    #[test]
+    fn render_order_discovery_keeps_active_trigger_parent_and_working_child() {
+        // When a TRIGGER parent is still active (e.g. AWAITING_CONDITION),
+        // both parent and working child should appear.
+        let output = render_order_discovery_response(
+            serde_json::json!([{
+                "orderId": 1,
+                "orderStrategyType": "TRIGGER",
+                "status": "AWAITING_CONDITION",
+                "childOrderStrategies": [{
+                    "status": "WORKING",
+                    "orderType": "STOP"
+                }]
+            }]),
+            false,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 2);
+        assert_eq!(output["orders"][0]["status"], "WORKING");
+        assert_eq!(output["orders"][1]["status"], "AWAITING_CONDITION");
+    }
+
+    #[test]
+    fn render_order_discovery_filters_trigger_child_by_symbol() {
+        // Symbol filtering works on expanded trigger children.
+        let output = render_order_discovery_response(
+            serde_json::json!([{
+                "orderId": 1,
+                "orderStrategyType": "TRIGGER",
+                "status": "FILLED",
+                "childOrderStrategies": [{
+                    "status": "WORKING",
+                    "orderType": "STOP",
+                    "orderLegCollection": [{
+                        "instrument": { "symbol": "IBM" }
+                    }]
+                }]
+            }]),
+            false,
+            Some("IBM"),
+        )
+        .unwrap();
+
+        assert_eq!(output["count"], 1);
+        assert_eq!(output["orders"][0]["orderType"], "STOP");
+    }
+
+    #[test]
+    fn render_order_discovery_excludes_non_matching_trigger_child_by_symbol() {
+        // When the child's symbol doesn't match, it's excluded.
+        let output = render_order_discovery_response(
+            serde_json::json!([{
+                "orderId": 1,
+                "orderStrategyType": "TRIGGER",
+                "status": "FILLED",
+                "childOrderStrategies": [{
+                    "status": "WORKING",
+                    "orderType": "STOP",
+                    "orderLegCollection": [{
+                        "instrument": { "symbol": "AAPL" }
+                    }]
+                }]
+            }]),
             false,
             Some("IBM"),
         )
