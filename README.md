@@ -1,5 +1,10 @@
 # schwab-agent-rs
 
+> [!IMPORTANT]
+> This repository is archived. The `schwab-agent` binary now lives in [`major/schwab-rs`](https://github.com/major/schwab-rs) as the default `cli` feature binary target.
+>
+> Use the active repository for source code, issues, pull requests, releases, and documentation: <https://github.com/major/schwab-rs>
+
 Agent-oriented JSON CLI porcelain for the Charles Schwab API, built on top of [schwab-rs](https://github.com/major/schwab-rs).
 
 > **Disclaimer:** This project is unofficial and is not affiliated with, endorsed by, or connected to Charles Schwab, TD Ameritrade, or thinkorswim in any way. Use at your own risk.

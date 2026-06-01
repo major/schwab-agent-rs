@@ -1,5 +1,8 @@
 # AGENTS.md - schwab-agent-rs
 
+> [!IMPORTANT]
+> This repository is archived. The `schwab-agent` binary now lives in [`major/schwab-rs`](https://github.com/major/schwab-rs) as the default `cli` feature binary target. Do not plan new work here; use <https://github.com/major/schwab-rs> for source code, issues, pull requests, releases, and documentation.
+
 > **KEEP DOCS IN SYNC.** Any change to commands, args, output format, error codes, features, or workflows MUST be reflected in both `AGENTS.md` and `README.md` as part of the same PR. Stale docs are worse than no docs.
 
 ## What This Is
