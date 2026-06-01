@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.7] - 2026-06-01
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- *(order)* Surface working trigger child orders in order get
+
+
 ## [0.4.6] - 2026-05-21
 
 ### <!-- 1 -->🐛 Bug Fixes
